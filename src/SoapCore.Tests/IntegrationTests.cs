@@ -1,11 +1,12 @@
 using System;
-using System.Linq;
+using System.Collections.Generic;
 using System.ServiceModel;
 using System.ServiceModel.Channels;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SoapCore.Tests.Model;
+using SoapCore.Tests.Utilities;
 
 namespace SoapCore.Tests
 {
@@ -18,7 +19,7 @@ namespace SoapCore.Tests
 			Task.Run(() =>
 			{
 				var host = new WebHostBuilder()
-					.UseKestrel()
+					.UseKestrel(x => x.AllowSynchronousIO = true)
 					.UseUrls("http://localhost:5050")
 					.UseStartup<Startup>()
 					.Build();
@@ -39,6 +40,14 @@ namespace SoapCore.Tests
 		public void PingSoap12()
 		{
 			var client = CreateSoap12Client();
+			var result = client.Ping("hello, world");
+			Assert.AreEqual("hello, world", result);
+		}
+
+		[TestMethod]
+		public void PingSoap11Iso55891()
+		{
+			var client = CreateSoap11Iso88591Client();
 			var result = client.Ping("hello, world");
 			Assert.AreEqual("hello, world", result);
 		}
@@ -125,6 +134,77 @@ namespace SoapCore.Tests
 		}
 
 		[TestMethod]
+		public void ArrayInput()
+		{
+			var client = CreateClient();
+			List<ComplexModelInput> complexModelInputs = new List<ComplexModelInput>();
+			complexModelInputs.Add(new ComplexModelInput());
+			var e = client.ArrayOfComplexItems(complexModelInputs.ToArray());
+			Assert.AreEqual(e.Length, complexModelInputs.Count);
+		}
+
+		[TestMethod]
+		public void ListInput()
+		{
+			var client = CreateClient();
+			List<ComplexModelInput> complexModelInputs = new List<ComplexModelInput>();
+			complexModelInputs.Add(new ComplexModelInput());
+			var e = client.ListOfComplexItems(complexModelInputs);
+			Assert.AreEqual(e.Count, complexModelInputs.Count);
+		}
+
+		[TestMethod]
+		public void DictionaryInput()
+		{
+			var client = CreateClient();
+			Dictionary<string, string> dictionaryInputs = new Dictionary<string, string>();
+			dictionaryInputs.Add("1", "2");
+			var e = client.ListOfDictionaryItems(dictionaryInputs);
+			Assert.AreEqual(e["1"], dictionaryInputs["1"]);
+			Assert.AreEqual(e.Count, dictionaryInputs.Count);
+		}
+
+		[TestMethod]
+		[DataRow(typeof(ComplexInheritanceModelInputA))]
+		[DataRow(typeof(ComplexInheritanceModelInputB))]
+		public void GetComplexInheritanceModel(Type type)
+		{
+			var client = CreateClient();
+			var input = (ComplexInheritanceModelInputBase)Activator.CreateInstance(type);
+			var output = client.GetComplexInheritanceModel(input);
+			Assert.AreEqual(input.GetType(), output.GetType());
+		}
+
+		[TestMethod]
+		public void ComplexModelInputFromServiceKnownType()
+		{
+			var client = CreateClient();
+			var input = new ComplexModelInput
+			{
+				IntProperty = 123,
+				StringProperty = "Test string",
+			};
+			var output = client.ComplexModelInputFromServiceKnownType(input);
+			Assert.AreEqual(input.IntProperty, output.IntProperty);
+			Assert.AreEqual(input.StringProperty, output.StringProperty);
+		}
+
+		[TestMethod]
+		public void ObjectFromServiceKnownType()
+		{
+			var client = CreateClient();
+			var input = new ComplexModelInput
+			{
+				IntProperty = 123,
+				StringProperty = "Test string",
+			};
+			var output = client.ObjectFromServiceKnownType(input);
+			Assert.IsInstanceOfType(output, typeof(ComplexModelInput));
+			Assert.AreEqual(input.IntProperty, ((ComplexModelInput)output).IntProperty);
+			Assert.AreEqual(input.StringProperty, ((ComplexModelInput)output).StringProperty);
+		}
+
+		[TestMethod]
 		public void ThrowsFaultException()
 		{
 			var client = CreateClient();
@@ -146,6 +226,32 @@ namespace SoapCore.Tests
 		}
 
 		[TestMethod]
+		public void ExceptionMessageSoap12()
+		{
+			var client = CreateSoap12Client();
+
+			var e = Assert.ThrowsException<FaultException>(() =>
+			{
+				client.ThrowExceptionWithMessage("Your error message here");
+			});
+
+			Assert.AreEqual("Your error message here", e.Message);
+		}
+
+		[TestMethod]
+		public void ExceptionMessageSoap11iso88591()
+		{
+			var client = CreateSoap11Iso88591Client();
+
+			var e = Assert.ThrowsException<FaultException>(() =>
+			{
+				client.ThrowExceptionWithMessage("Your error message here");
+			});
+
+			Assert.AreEqual("Your error message here", e.Message);
+		}
+
+		[TestMethod]
 		public void ThrowsDetailedFault()
 		{
 			var client = CreateClient();
@@ -153,6 +259,20 @@ namespace SoapCore.Tests
 			{
 				client.ThrowDetailedFault("Detail message");
 			});
+			Assert.IsNotNull(e.Detail);
+			Assert.AreEqual("Detail message", e.Detail.ExceptionProperty);
+		}
+
+		[TestMethod]
+		public void ThrowsDetailedSoap12Fault()
+		{
+			var client = CreateSoap12Client();
+
+			var e = Assert.ThrowsException<FaultException<FaultDetail>>(() =>
+			{
+				client.ThrowDetailedFault("Detail message");
+			});
+
 			Assert.IsNotNull(e.Detail);
 			Assert.AreEqual("Detail message", e.Detail.ExceptionProperty);
 		}
@@ -173,6 +293,17 @@ namespace SoapCore.Tests
 			var textencoding = new TextMessageEncodingBindingElement(MessageVersion.Soap12WSAddressing10, System.Text.Encoding.UTF8);
 			var binding = new CustomBinding(textencoding, transport);
 			var endpoint = new EndpointAddress(new Uri(string.Format("http://{0}:5050/Service.svc", "localhost")));
+			var channelFactory = new ChannelFactory<ITestService>(binding, endpoint);
+			var serviceClient = channelFactory.CreateChannel();
+			return serviceClient;
+		}
+
+		private ITestService CreateSoap11Iso88591Client()
+		{
+			var transport = new HttpTransportBindingElement();
+			var textencoding = new CustomTextMessageBindingElement("iso-8859-1", "text/xml", MessageVersion.Soap11);
+			var binding = new CustomBinding(textencoding, transport);
+			var endpoint = new EndpointAddress(new Uri(string.Format("http://{0}:5050/WSA11ISO88591Service.svc", "localhost")));
 			var channelFactory = new ChannelFactory<ITestService>(binding, endpoint);
 			var serviceClient = channelFactory.CreateChannel();
 			return serviceClient;

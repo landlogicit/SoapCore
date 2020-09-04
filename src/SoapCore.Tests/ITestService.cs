@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.ServiceModel;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
@@ -50,6 +51,9 @@ namespace SoapCore.Tests
 		[OperationContract]
 		void ThrowException();
 
+		[OperationContract(Name = "ThrowExceptionAsync")]
+		Task ThrowExceptionAsync();
+
 		[OperationContract]
 		void ThrowExceptionWithMessage(string message);
 
@@ -63,5 +67,25 @@ namespace SoapCore.Tests
 
 		[OperationContract]
 		string PingWithServiceOperationTuning();
+
+		[OperationContract]
+		ComplexModelInput[] ArrayOfComplexItems(ComplexModelInput[] items);
+
+		[OperationContract]
+		List<ComplexModelInput> ListOfComplexItems(List<ComplexModelInput> items);
+
+		[OperationContract]
+		Dictionary<string, string> ListOfDictionaryItems(Dictionary<string, string> items);
+
+		[OperationContract]
+		ComplexInheritanceModelInputBase GetComplexInheritanceModel(ComplexInheritanceModelInputBase input);
+
+		[ServiceKnownType(typeof(ComplexModelInput))]
+		[OperationContract]
+		ComplexModelInput ComplexModelInputFromServiceKnownType(object value);
+
+		[ServiceKnownType(typeof(ComplexModelInput))]
+		[OperationContract]
+		object ObjectFromServiceKnownType(ComplexModelInput value);
 	}
 }

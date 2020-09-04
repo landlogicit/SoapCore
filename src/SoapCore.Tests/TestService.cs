@@ -42,6 +42,11 @@ namespace SoapCore.Tests
 			throw new Exception();
 		}
 
+		public async Task ThrowExceptionAsync()
+		{
+			await Task.Run(() => throw new Exception());
+		}
+
 		public void ThrowExceptionWithMessage(string message)
 		{
 			throw new Exception(message);
@@ -106,6 +111,67 @@ namespace SoapCore.Tests
 		public string PingWithServiceOperationTuning()
 		{
 			return _pingResultValue.Value;
+		}
+
+		public ComplexModelInput[] ArrayOfComplexItems(ComplexModelInput[] items)
+		{
+			return items;
+		}
+
+		public List<ComplexModelInput> ListOfComplexItems(List<ComplexModelInput> items)
+		{
+			return items;
+		}
+
+		public Dictionary<string, string> ListOfDictionaryItems(Dictionary<string, string> items)
+		{
+			return items;
+		}
+
+		public ComplexInheritanceModelInputBase GetComplexInheritanceModel(ComplexInheritanceModelInputBase input)
+		{
+			switch (input)
+			{
+				case ComplexInheritanceModelInputB _:
+					{
+						return new ComplexInheritanceModelInputB();
+					}
+
+				case ComplexInheritanceModelInputA _:
+					{
+						return new ComplexInheritanceModelInputA();
+					}
+
+				default:
+					{
+						throw new NotImplementedException();
+					}
+			}
+		}
+
+		public ComplexModelInput ComplexModelInputFromServiceKnownType(object value)
+		{
+			if (value is null)
+			{
+				throw new ArgumentNullException(nameof(value));
+			}
+
+			if (value is ComplexModelInput input)
+			{
+				return input;
+			}
+
+			throw new Exception($"Invalid object type `{value.GetType()}`.");
+		}
+
+		public object ObjectFromServiceKnownType(ComplexModelInput value)
+		{
+			if (value is null)
+			{
+				throw new ArgumentNullException(nameof(value));
+			}
+
+			return value;
 		}
 	}
 }

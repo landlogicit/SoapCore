@@ -8,7 +8,11 @@ namespace SoapCore.Tests.OperationDescription
 	{
 		Task<CoolResponseClass> GetMyClass();
 
+		Task<CoolResponseClass> GetMyAsyncClassAsync();
+
 		CoolResponseClass GetMyOtherClass();
+
+		ClassWithXmlRoot GetClassWithXmlRoot(ClassWithXmlRoot classWithXmlRoot);
 
 		string GetMyStringClass();
 

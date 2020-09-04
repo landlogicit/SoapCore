@@ -1,6 +1,9 @@
 using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.Serialization;
 
 namespace SoapCore
 {
@@ -47,6 +50,7 @@ namespace SoapCore
 					{
 						return false;
 					}
+
 					for (var i = 0; i < genericArguments.Length; i++)
 					{
 						var genericArgument = genericArguments[i];
@@ -56,6 +60,7 @@ namespace SoapCore
 							return false;
 						}
 					}
+
 					return true;
 				});
 			MethodInfo result = null;
@@ -70,6 +75,110 @@ namespace SoapCore
 			}
 
 			return result?.MakeGenericMethod(typeArguments);
+		}
+
+		/// <summary>
+		/// Gets the field or property members of the specific type.
+		/// </summary>
+		/// <param name="type">The type to look for field or property members for</param>
+		/// <returns>An enumerable containing members which are fields or properties</returns>
+		internal static IEnumerable<MemberInfo> GetPropertyOrFieldMembers(this Type type) =>
+			type.GetFields()
+				.Cast<MemberInfo>()
+				.Concat(type.GetProperties());
+
+		/// <summary>
+		/// Gets the field or property type of a member. Returns null if the member is neither a field or
+		/// a property member
+		/// </summary>
+		/// <param name="memberInfo">The member to get the field or property type</param>
+		/// <returns>The return type of the member, null if it could not be determined</returns>
+		internal static Type GetPropertyOrFieldType(this MemberInfo memberInfo)
+		{
+			if (memberInfo is FieldInfo fi)
+			{
+				return fi.FieldType;
+			}
+
+			if (memberInfo is PropertyInfo pi)
+			{
+				return pi.PropertyType;
+			}
+
+			return null;
+		}
+
+		internal static void SetValueToPropertyOrField(this MemberInfo memberInfo, object obj, object value)
+		{
+			if (memberInfo is FieldInfo fi)
+			{
+				fi.SetValue(obj, value);
+			}
+			else if (memberInfo is PropertyInfo pi)
+			{
+				pi.SetValue(obj, value);
+			}
+			else
+			{
+				throw new NotImplementedException("Cannot set value of parameter type from " + memberInfo.GetType()?.Name);
+			}
+		}
+
+		internal static object GetPropertyOrFieldValue(this MemberInfo memberInfo, object obj)
+		{
+			if (memberInfo is FieldInfo fi)
+			{
+				return fi.GetValue(obj);
+			}
+
+			if (memberInfo is PropertyInfo pi)
+			{
+				return pi.GetValue(obj);
+			}
+
+			throw new NotImplementedException($"Unable to get value out of member with type {memberInfo.GetType()}");
+		}
+
+		internal static IEnumerable<MemberInfo> GetMembersWithAttribute<TAttribute>(this Type type)
+			where TAttribute : Attribute
+		{
+			return GetPropertyOrFieldMembers(type).Where(x => x.GetCustomAttribute<TAttribute>() != null);
+		}
+
+		internal static bool TryGetBaseTypeWithKnownTypes(this Type type, out Type result)
+		{
+			if (type is null)
+			{
+				throw new ArgumentNullException(nameof(type));
+			}
+
+			if (type.IsEnum || type.IsPrimitive || type.IsValueType)
+			{
+				result = null;
+				return false;
+			}
+
+			if (type.IsArray || typeof(IEnumerable).IsAssignableFrom(type))
+			{
+				result = null;
+				return false;
+			}
+
+			Type baseType = type.GetTypeInfo().BaseType;
+			if (baseType is null || baseType.Name.Equals("Object"))
+			{
+				result = null;
+				return false;
+			}
+
+			bool hasKnownTypes = baseType
+				.GetCustomAttributes<KnownTypeAttribute>()
+				.Any();
+
+			result = hasKnownTypes
+				? baseType
+				: null;
+			return hasKnownTypes;
 		}
 	}
 }

@@ -1,9 +1,16 @@
+using System;
+using System.IO;
+using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using DeepEqual.Syntax;
+using Microsoft.AspNetCore.Razor.TagHelpers;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Moq;
 using Shouldly;
 using SoapCore.Tests.Serialization.Models.Xml;
 using Xunit;
+using Assert = Xunit.Assert;
 
 namespace SoapCore.Tests.Serialization
 {
@@ -151,12 +158,12 @@ namespace SoapCore.Tests.Serialization
 		// not compatible with DataContractSerializer
 		[Theory]
 		[InlineData(SoapSerializer.XmlSerializer)]
-		public void TestPingComplexModelSerialization(SoapSerializer soapSerializer)
+		public void TestPingComplexModelSerializationWithNameSpace(SoapSerializer soapSerializer)
 		{
 			var sampleServiceClient = _fixture.GetSampleServiceClient(soapSerializer);
 
 			_fixture.ServiceMock
-				.Setup(x => x.PingComplexModel(It.IsAny<ComplexModel2>()))
+				.Setup(x => x.PingComplexModel2(It.IsAny<ComplexModel2>()))
 				.Callback(
 					(ComplexModel2 inputModel_service) =>
 					{
@@ -167,10 +174,35 @@ namespace SoapCore.Tests.Serialization
 
 			var pingComplexModelResult_client =
 				sampleServiceClient
-					.PingComplexModel(ComplexModel2.CreateSample2());
+					.PingComplexModel2(ComplexModel2.CreateSample2());
 
 			// check output paremeters serialization
 			pingComplexModelResult_client.ShouldDeepEqual(ComplexModel1.CreateSample3());
+		}
+
+		// not compatible with DataContractSerializer
+		[Theory]
+		[InlineData(SoapSerializer.XmlSerializer)]
+		public void TestPingComplexModelSerializationWithNoNameSpace(SoapSerializer soapSerializer)
+		{
+			var sampleServiceClient = _fixture.GetSampleServiceClient(soapSerializer);
+
+			_fixture.ServiceMock
+				.Setup(x => x.PingComplexModel1(It.IsAny<ComplexModel1>()))
+				.Callback(
+					(ComplexModel1 inputModel_service) =>
+					{
+						// check input paremeters serialization
+						inputModel_service.ShouldDeepEqual(ComplexModel1.CreateSample3());
+					})
+				.Returns(ComplexModel2.CreateSample2);
+
+			var pingComplexModelResult_client =
+				sampleServiceClient
+					.PingComplexModel1(ComplexModel1.CreateSample3());
+
+			// check output paremeters serialization
+			pingComplexModelResult_client.ShouldDeepEqual(ComplexModel2.CreateSample2());
 		}
 
 		[Theory]
@@ -241,6 +273,18 @@ namespace SoapCore.Tests.Serialization
 			result.ShouldDeepEqual(data);
 		}
 
+		[Theory]
+		[InlineData(SoapSerializer.XmlSerializer)]
+		public void TestResponseIntArray(SoapSerializer soapSerializer)
+		{
+			var sampleServiceClient = _fixture.GetSampleServiceClient(soapSerializer);
+			var data = new[] { 2, 5 };
+			_fixture.ServiceMock.Setup(x => x.PingIntArray(data)).Callback((int[] input) => input.ShouldDeepEqual(data))
+				.Returns(data);
+			var result = sampleServiceClient.PingIntArray(data);
+			result.ShouldDeepEqual(data);
+		}
+
 		//not compatible with DataContractSerializer
 		[Theory]
 		[InlineData(SoapSerializer.XmlSerializer)]
@@ -301,6 +345,176 @@ namespace SoapCore.Tests.Serialization
 			responseModelRef2_client.ShouldDeepEqual(ComplexModel1.CreateSample1());
 			responseModelOut1_client.ShouldDeepEqual(ComplexModel2.CreateSample3());
 			responseModelOut2_client.ShouldDeepEqual(ComplexModel1.CreateSample1());
+		}
+
+		//not compatible with DataContractSerializer
+		[Theory]
+		[InlineData(SoapSerializer.XmlSerializer)]
+		public void TestNotWrappedPropertyComplexInput(SoapSerializer soapSerializer)
+		{
+			var sampleServiceClient = _fixture.GetSampleServiceClient(soapSerializer);
+
+			_fixture.ServiceMock
+				.Setup(x => x.NotWrappedPropertyComplexInputRequestMethod(It.IsAny<NotWrappedPropertyComplexInputRequest>()))
+				.Callback((NotWrappedPropertyComplexInputRequest request) =>
+				{
+					// Check deserialisation in service!
+					request.NotWrappedComplexInput.ShouldNotBeNull();
+					request.NotWrappedComplexInput.StringProperty.ShouldBe("z");
+				})
+				.Returns(() => new NotWrappedPropertyComplexInputResponse
+				{
+					NotWrappedComplexInput = new NotWrappedPropertyComplexInput
+					{
+						StringProperty = "z"
+					}
+				});
+
+			var clientResponse = sampleServiceClient.NotWrappedPropertyComplexInputRequestMethod(new NotWrappedPropertyComplexInputRequest
+			{
+				NotWrappedComplexInput = new NotWrappedPropertyComplexInput
+				{
+					StringProperty = "z"
+				}
+			});
+
+			clientResponse.ShouldNotBeNull();
+
+			clientResponse.NotWrappedComplexInput.ShouldNotBeNull();
+			clientResponse.NotWrappedComplexInput.StringProperty.ShouldBe("z");
+		}
+
+		[Theory]
+		[InlineData(SoapSerializer.XmlSerializer)]
+		public void TestUnwrappedSimpleMessageBodyMemberResponse(SoapSerializer soapSerializer)
+		{
+			var sampleServiceClient = _fixture.GetSampleServiceClient(soapSerializer);
+
+			_fixture.ServiceMock
+				.Setup(x => x.TestUnwrappedStringMessageBodyMember(It.IsAny<BasicMessageContractPayload>()))
+				.Returns(() => new UnwrappedStringMessageBodyMemberResponse
+				{
+					StringProperty = "one"
+				});
+
+			var clientResponse = sampleServiceClient.TestUnwrappedStringMessageBodyMember(new BasicMessageContractPayload());
+
+			clientResponse.ShouldNotBeNull();
+			clientResponse.StringProperty.ShouldBe("one");
+		}
+
+		[Theory]
+		[InlineData(SoapSerializer.XmlSerializer)]
+		public void TestUnwrappedMultipleMessageBodyMemberResponse(SoapSerializer soapSerializer)
+		{
+			var sampleServiceClient = _fixture.GetSampleServiceClient(soapSerializer);
+
+			_fixture.ServiceMock
+				.Setup(x => x.TestUnwrappedMultipleMessageBodyMember(It.IsAny<BasicMessageContractPayload>()))
+				.Returns(new UnwrappedMultipleMessageBodyMemberResponse
+				{
+					NotWrappedComplexInput1 = new NotWrappedPropertyComplexInput
+					{
+						StringProperty = "one"
+					},
+
+					NotWrappedComplexInput2 = new NotWrappedPropertyComplexInput
+					{
+						StringProperty = "two"
+					}
+				});
+
+			var clientResponse = sampleServiceClient.TestUnwrappedMultipleMessageBodyMember(new BasicMessageContractPayload());
+
+			clientResponse.ShouldNotBeNull();
+
+			clientResponse.NotWrappedComplexInput1.ShouldNotBeNull();
+			clientResponse.NotWrappedComplexInput1.StringProperty.ShouldBe("one");
+
+			clientResponse.NotWrappedComplexInput2.ShouldNotBeNull();
+			clientResponse.NotWrappedComplexInput2.StringProperty.ShouldBe("two");
+		}
+
+		//not compatible with DataContractSerializer
+		[Theory]
+		[InlineData(SoapSerializer.XmlSerializer)]
+		public void TestNotWrappedFieldComplexInput(SoapSerializer soapSerializer)
+		{
+			var sampleServiceClient = _fixture.GetSampleServiceClient(soapSerializer);
+
+			_fixture.ServiceMock
+				.Setup(x => x.NotWrappedFieldComplexInputRequestMethod(It.IsAny<NotWrappedFieldComplexInputRequest>()))
+				.Callback((NotWrappedFieldComplexInputRequest request) =>
+				{
+					// Check deserialisation in service!
+					request.NotWrappedComplexInput.ShouldNotBeNull();
+					request.NotWrappedComplexInput.StringProperty.ShouldBe("z");
+				})
+				.Returns(() => new NotWrappedFieldComplexInputResponse
+				{
+					NotWrappedComplexInput = new NotWrappedFieldComplexInput
+					{
+						StringProperty = "z"
+					}
+				});
+
+			var clientResponse = sampleServiceClient.NotWrappedFieldComplexInputRequestMethod(new NotWrappedFieldComplexInputRequest
+			{
+				NotWrappedComplexInput = new NotWrappedFieldComplexInput
+				{
+					StringProperty = "z"
+				}
+			});
+
+			clientResponse.ShouldNotBeNull();
+
+			clientResponse.NotWrappedComplexInput.ShouldNotBeNull();
+			clientResponse.NotWrappedComplexInput.StringProperty.ShouldBe("z");
+		}
+
+		//not compatible with DataContractSerializer
+		[Theory]
+		[InlineData(SoapSerializer.XmlSerializer)]
+		public void TestNotWrappedFieldDoubleComplexInput(SoapSerializer soapSerializer)
+		{
+			var sampleServiceClient = _fixture.GetSampleServiceClient(soapSerializer);
+
+			_fixture.ServiceMock
+				.Setup(x => x.NotWrappedFieldDoubleComplexInputRequestMethod(It.IsAny<NotWrappedFieldDoubleComplexInputRequest>()))
+				.Callback((NotWrappedFieldDoubleComplexInputRequest request) =>
+				{
+					// Check deserialisation in service!
+					request.NotWrappedComplexInput1.ShouldNotBeNull();
+					request.NotWrappedComplexInput1.StringProperty.ShouldBe("z");
+
+					request.NotWrappedComplexInput2.ShouldNotBeNull();
+					request.NotWrappedComplexInput2.StringProperty.ShouldBe("x");
+				})
+				.Returns(() => new NotWrappedFieldComplexInputResponse
+				{
+					NotWrappedComplexInput = new NotWrappedFieldComplexInput
+					{
+						StringProperty = "z"
+					}
+				});
+
+			var clientResponse = sampleServiceClient.NotWrappedFieldDoubleComplexInputRequestMethod(new NotWrappedFieldDoubleComplexInputRequest
+			{
+				NotWrappedComplexInput1 = new NotWrappedFieldComplexInput
+				{
+					StringProperty = "z"
+				},
+
+				NotWrappedComplexInput2 = new NotWrappedFieldComplexInput
+				{
+					StringProperty = "x"
+				}
+			});
+
+			clientResponse.ShouldNotBeNull();
+
+			clientResponse.NotWrappedComplexInput.ShouldNotBeNull();
+			clientResponse.NotWrappedComplexInput.StringProperty.ShouldBe("z");
 		}
 
 		//not compatible with DataContractSerializer
@@ -379,6 +593,123 @@ namespace SoapCore.Tests.Serialization
 
 			// check output paremeters serialization
 			emptyParamsMethodResult_client.ShouldDeepEqual(ComplexModel1.CreateSample2());
+		}
+
+		[Theory]
+		[InlineData(SoapSerializer.XmlSerializer)]
+		public void TestStreamSerializationWtihModel(SoapSerializer soapSerializer)
+		{
+			var sampleServiceClient = _fixture.GetSampleServiceClient(soapSerializer);
+
+			var model = new DataContractWithStream
+			{
+				Data = new MemoryStream(Encoding.ASCII.GetBytes(Guid.NewGuid().ToString())),
+				Header = Guid.NewGuid().ToString()
+			};
+			_fixture.ServiceMock.Setup(x => x.PingStream(It.IsAny<DataContractWithStream>())).Callback((DataContractWithStream inputModel) =>
+			{
+				Assert.Equal(model.Data.Length, inputModel.Data.Length);
+				Assert.Equal(model.Header, inputModel.Header);
+			}).Returns(() =>
+			{
+				return new DataContractWithStream
+				{
+					Data = model.Data,
+					Header = model.Header
+				};
+			});
+
+			var result = sampleServiceClient.PingStream(model);
+
+			model.Data.Position = 0;
+			var resultStream = new MemoryStream();
+			result.Data.CopyTo(resultStream);
+			Assert.Equal(Encoding.ASCII.GetString((model.Data as MemoryStream).ToArray()), Encoding.ASCII.GetString(((MemoryStream)resultStream).ToArray()));
+			Assert.Equal(model.Header, result.Header);
+		}
+
+		[Theory]
+		[InlineData(SoapSerializer.XmlSerializer)]
+		public void TestStreamResultSerialization(SoapSerializer soapSerializer)
+		{
+			var sampleServiceClient = _fixture.GetSampleServiceClient(soapSerializer);
+
+			var streamData = Guid.NewGuid().ToString();
+			_fixture.ServiceMock.Setup(x => x.GetStream()).Returns(() => new MemoryStream(Encoding.ASCII.GetBytes(streamData)));
+
+			var result = sampleServiceClient.GetStream();
+
+			var resultStream = new MemoryStream();
+			result.CopyTo(resultStream);
+			Assert.Equal(streamData, Encoding.ASCII.GetString(resultStream.ToArray()));
+		}
+
+		[Theory]
+		[InlineData(SoapSerializer.XmlSerializer)]
+		[InlineData(SoapSerializer.DataContractSerializer)]
+		public void TestStreamBigSerialization(SoapSerializer soapSerializer)
+		{
+			var sampleServiceClient = _fixture.GetSampleServiceClient(soapSerializer);
+
+			var streamData = string.Join(",", Enumerable.Range(1, 900000));
+			_fixture.ServiceMock.Setup(x => x.GetStream()).Returns(() => new MemoryStream(Encoding.ASCII.GetBytes(streamData)));
+
+			var result = sampleServiceClient.GetStream();
+
+			var resultStream = new MemoryStream();
+			result.CopyTo(resultStream);
+			Assert.Equal(streamData, Encoding.ASCII.GetString(resultStream.ToArray()));
+		}
+
+		[Theory]
+		[InlineData(SoapSerializer.XmlSerializer)]
+		[InlineData(SoapSerializer.DataContractSerializer)]
+		public void TestStringBigSerialization(SoapSerializer soapSerializer)
+		{
+			var sampleServiceClient = _fixture.GetSampleServiceClient(soapSerializer);
+
+			_fixture.ServiceMock.Reset();
+
+			var streamData = string.Join(",", Enumerable.Range(1, 900000));
+
+			var result = sampleServiceClient.Ping(streamData);
+		}
+
+		[Theory]
+		[InlineData(SoapSerializer.XmlSerializer)]
+		[InlineData(SoapSerializer.DataContractSerializer)]
+		public void TestOneWayCall(SoapSerializer soapSerializer)
+		{
+			var sampleServiceClient = _fixture.GetSampleServiceClient(soapSerializer);
+			const string message = "test";
+			_fixture.ServiceMock.Setup(x => x.OneWayCall(It.IsAny<string>())).Callback((string arg) =>
+			{
+				Assert.Equal(message, arg);
+			});
+			sampleServiceClient.OneWayCall(message);
+		}
+
+		//https://github.com/DigDes/SoapCore/issues/379
+		[Theory(Skip = "not reproducible")]
+		[InlineData(SoapSerializer.XmlSerializer)]
+		public void TestParameterWithXmlElementNamespace(SoapSerializer soapSerializer)
+		{
+			var sampleServiceClient = _fixture.GetSampleServiceClient(soapSerializer);
+			var obj = new DataContractWithoutNamespace
+			{
+				IntProperty = 1234,
+				StringProperty = "2222"
+			};
+
+			_fixture.ServiceMock.Setup(x => x.GetComplexObjectWithXmlElement(obj)).Returns(obj);
+			_fixture.ServiceMock.Setup(x => x.GetComplexObjectWithXmlElement(It.IsAny<DataContractWithoutNamespace>())).Callback(
+				(DataContractWithoutNamespace o) =>
+				{
+					Assert.Equal(obj.IntProperty, o.IntProperty);
+					Assert.Equal(obj.StringProperty, o.StringProperty);
+				});
+
+			sampleServiceClient.GetComplexObjectWithXmlElement(obj);
 		}
 	}
 }
