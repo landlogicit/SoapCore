@@ -5,6 +5,7 @@ using System.Linq;
 using System.Net.Sockets;
 using System.ServiceModel;
 using System.Threading;
+using System.Xml;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server.Features;
@@ -13,7 +14,7 @@ using Moq;
 
 namespace SoapCore.Tests.Serialization
 {
-	public class ServiceFixture<TService> : IDisposable
+	public sealed class ServiceFixture<TService> : IDisposable
 		where TService : class
 	{
 		private readonly IWebHost _host;
@@ -21,6 +22,12 @@ namespace SoapCore.Tests.Serialization
 
 		public ServiceFixture()
 		{
+			var binding = new BasicHttpBinding
+			{
+				MaxReceivedMessageSize = int.MaxValue,
+				ReaderQuotas = XmlDictionaryReaderQuotas.Max
+			};
+
 			// start service host
 			_host = new WebHostBuilder()
 				.ConfigureServices(services =>
@@ -33,19 +40,17 @@ namespace SoapCore.Tests.Serialization
 				})
 				.Configure(appBuilder =>
 				{
-#if ASPNET_21
-					appBuilder.UseSoapEndpoint<TService>("/Service.svc", new BasicHttpBinding(), SoapSerializer.DataContractSerializer);
-					appBuilder.UseSoapEndpoint<TService>("/Service.asmx", new BasicHttpBinding(), SoapSerializer.XmlSerializer);
+#if !NETCOREAPP3_0_OR_GREATER
+					appBuilder.UseSoapEndpoint<TService>("/Service.svc", new SoapEncoderOptions(), SoapSerializer.DataContractSerializer);
+					appBuilder.UseSoapEndpoint<TService>("/Service.asmx", new SoapEncoderOptions(), SoapSerializer.XmlSerializer);
 					appBuilder.UseMvc();
-#endif
-
-#if ASPNET_30
+#else
 					appBuilder.UseRouting();
 
 					appBuilder.UseEndpoints(x =>
 					{
-						x.UseSoapEndpoint<TService>("/Service.svc", new BasicHttpBinding(), SoapSerializer.DataContractSerializer);
-						x.UseSoapEndpoint<TService>("/Service.asmx", new BasicHttpBinding(), SoapSerializer.XmlSerializer);
+						x.UseSoapEndpoint<TService>("/Service.svc", new SoapEncoderOptions(), SoapSerializer.DataContractSerializer);
+						x.UseSoapEndpoint<TService>("/Service.asmx", new SoapEncoderOptions(), SoapSerializer.XmlSerializer);
 					});
 #endif
 				})
@@ -81,8 +86,6 @@ namespace SoapCore.Tests.Serialization
 			var address = addresses.Addresses.Single();
 
 			//make service client
-			var binding = new BasicHttpBinding();
-
 			var endpointXml = new EndpointAddress(new Uri($"{address}/Service.asmx"));
 			var channelFactoryXml = new ChannelFactory<TService>(binding, endpointXml);
 			var serviceClientXml = channelFactoryXml.CreateChannel();
@@ -113,6 +116,7 @@ namespace SoapCore.Tests.Serialization
 		public void Dispose()
 		{
 			_host.StopAsync();
+			_host.Dispose();
 		}
 	}
 }

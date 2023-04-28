@@ -8,9 +8,14 @@ using SoapCore.Tests.Model;
 
 namespace SoapCore.Tests
 {
-	public class TestService : ITestService
+	public sealed class TestService : ITestService, IDisposable
 	{
-		private ThreadLocal<string> _pingResultValue = new ThreadLocal<string>() { Value = string.Empty };
+		private readonly ThreadLocal<string> _pingResultValue = new ThreadLocal<string>() { Value = string.Empty };
+
+		public void Dispose()
+		{
+			_pingResultValue.Dispose();
+		}
 
 		public string Ping(string s)
 		{
@@ -111,6 +116,85 @@ namespace SoapCore.Tests
 		public string PingWithServiceOperationTuning()
 		{
 			return _pingResultValue.Value;
+		}
+
+		public ComplexModelInput[] ArrayOfComplexItems(ComplexModelInput[] items)
+		{
+			return items;
+		}
+
+		public List<ComplexModelInput> ListOfComplexItems(List<ComplexModelInput> items)
+		{
+			return items;
+		}
+
+		public Dictionary<string, string> ListOfDictionaryItems(Dictionary<string, string> items)
+		{
+			return items;
+		}
+
+		public ComplexInheritanceModelInputBase GetComplexInheritanceModel(ComplexInheritanceModelInputBase input)
+		{
+			switch (input)
+			{
+				case ComplexInheritanceModelInputB _:
+					{
+						return new ComplexInheritanceModelInputB();
+					}
+
+				case ComplexInheritanceModelInputA _:
+					{
+						return new ComplexInheritanceModelInputA();
+					}
+
+				default:
+					{
+						throw new NotImplementedException();
+					}
+			}
+		}
+
+		public ComplexModelInput ComplexModelInputFromServiceKnownType(object value)
+		{
+			if (value is null)
+			{
+				throw new ArgumentNullException(nameof(value));
+			}
+
+			if (value is ComplexModelInput input)
+			{
+				return input;
+			}
+
+			throw new Exception($"Invalid object type `{value.GetType()}`.");
+		}
+
+		public object ObjectFromServiceKnownType(ComplexModelInput value)
+		{
+			if (value is null)
+			{
+				throw new ArgumentNullException(nameof(value));
+			}
+
+			return value;
+		}
+
+		public string EmpryBody(EmptyMembers members)
+		{
+			return "OK";
+		}
+
+		public IComplexTreeModelInput GetComplexModelInputFromKnownTypeProvider(ComplexModelInput value)
+		{
+			if (value is null)
+			{
+				throw new ArgumentNullException(nameof(value));
+			}
+
+			return new ComplexTreeModelInput()
+			{
+				Item = value
+			};
 		}
 	}
 }

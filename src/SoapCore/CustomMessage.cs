@@ -1,4 +1,3 @@
-using System.ServiceModel;
 using System.ServiceModel.Channels;
 using System.Xml;
 
@@ -6,47 +5,82 @@ namespace SoapCore
 {
 	public class CustomMessage : Message
 	{
-		private readonly Message _message;
+		public CustomMessage()
+		{
+		}
 
 		public CustomMessage(Message message)
 		{
-			_message = message;
+			Message = message;
 		}
 
-		public override MessageHeaders Headers
-		{
-			get { return _message.Headers; }
-		}
+		public Message Message { get; internal set; }
 
-		public override MessageProperties Properties
-		{
-			get { return _message.Properties; }
-		}
+		public XmlNamespaceManager NamespaceManager { get; internal set; }
 
-		public override MessageVersion Version
-		{
-			get { return _message.Version; }
-		}
+		public System.Collections.Generic.Dictionary<string, string> AdditionalEnvelopeXmlnsAttributes { get; internal set; }
+
+		public bool? StandAloneAttribute { get; set; }
+
+		public override MessageHeaders Headers => Message.Headers;
+
+		public override MessageProperties Properties => Message.Properties;
+
+		public override MessageVersion Version => Message.Version;
+
+		public override bool IsEmpty => Message.IsEmpty;
+
+		public override bool IsFault => Message.IsFault;
 
 		protected override void OnWriteStartEnvelope(XmlDictionaryWriter writer)
 		{
-			writer.WriteStartDocument();
-			if (_message.Version.Envelope == EnvelopeVersion.Soap11)
+			if (StandAloneAttribute.HasValue)
 			{
-				writer.WriteStartElement("s", "Envelope", "http://schemas.xmlsoap.org/soap/envelope/");
+				writer.WriteStartDocument(StandAloneAttribute.Value);
 			}
 			else
 			{
-				writer.WriteStartElement("s", "Envelope", "http://www.w3.org/2003/05/soap-envelope");
+				writer.WriteStartDocument();
 			}
 
-			writer.WriteAttributeString("xmlns:xsd", "http://www.w3.org/2001/XMLSchema");
-			writer.WriteAttributeString("xmlns:xsi", "http://www.w3.org/2001/XMLSchema-instance");
+			var prefix = Version.Envelope.NamespacePrefix(NamespaceManager);
+			writer.WriteStartElement(prefix, "Envelope", Version.Envelope.Namespace());
+			writer.WriteXmlnsAttribute(prefix, Version.Envelope.Namespace());
+
+			var xsdPrefix = Namespaces.AddNamespaceIfNotAlreadyPresentAndGetPrefix(NamespaceManager, "xsd", Namespaces.XMLNS_XSD);
+			writer.WriteXmlnsAttribute(xsdPrefix, Namespaces.XMLNS_XSD);
+
+			var xsiPrefix = Namespaces.AddNamespaceIfNotAlreadyPresentAndGetPrefix(NamespaceManager, "xsi", Namespaces.XMLNS_XSI);
+			writer.WriteXmlnsAttribute(xsiPrefix, Namespaces.XMLNS_XSI);
+
+			if (AdditionalEnvelopeXmlnsAttributes != null)
+			{
+				foreach (var rec in AdditionalEnvelopeXmlnsAttributes)
+				{
+					writer.WriteXmlnsAttribute(rec.Key, rec.Value);
+				}
+			}
+		}
+
+		protected override void OnWriteStartHeaders(XmlDictionaryWriter writer)
+		{
+			writer.WriteStartElement(Version.Envelope.NamespacePrefix(NamespaceManager), "Header", Version.Envelope.Namespace());
+		}
+
+		protected override void OnWriteStartBody(XmlDictionaryWriter writer)
+		{
+			writer.WriteStartElement(Version.Envelope.NamespacePrefix(NamespaceManager), "Body", Version.Envelope.Namespace());
 		}
 
 		protected override void OnWriteBodyContents(XmlDictionaryWriter writer)
 		{
-			_message.WriteBodyContents(writer);
+			Message.WriteBodyContents(writer);
+		}
+
+		protected override void OnClose()
+		{
+			Message.Close();
+			base.OnClose();
 		}
 	}
 }

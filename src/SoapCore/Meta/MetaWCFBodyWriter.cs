@@ -15,39 +15,31 @@ using SoapCore.ServiceModel;
 
 namespace SoapCore.Meta
 {
-	internal class MetaWCFBodyWriter : BodyWriter
+	public class MetaWCFBodyWriter : BodyWriter
 	{
-#pragma warning disable SA1310 // Field names must not contain underscore
-		private const string XMLNS_XS = "http://www.w3.org/2001/XMLSchema";
-		private const string TRANSPORT_SCHEMA = "http://schemas.xmlsoap.org/soap/http";
-		private const string ARRAYS_NS = "http://schemas.microsoft.com/2003/10/Serialization/Arrays";
-		private const string SYSTEM_NS = "http://schemas.datacontract.org/2004/07/System";
-		private const string DataContractNamespace = "http://schemas.datacontract.org/2004/07/";
-		private const string SERIALIZATION_NS = "http://schemas.microsoft.com/2003/10/Serialization/";
-#pragma warning restore SA1310 // Field names must not contain underscore
-
 #pragma warning disable SA1009 // Closing parenthesis must be spaced correctly
 #pragma warning disable SA1008 // Opening parenthesis must be spaced correctly
 		private static readonly Dictionary<string, (string, string)> SysTypeDic = new Dictionary<string, (string, string)>()
 		{
-			["System.String"] = ("string", SYSTEM_NS),
-			["System.Boolean"] = ("boolean", SYSTEM_NS),
-			["System.Int16"] = ("short", SYSTEM_NS),
-			["System.Int32"] = ("int", SYSTEM_NS),
-			["System.Int64"] = ("long", SYSTEM_NS),
-			["System.Byte"] = ("byte", SYSTEM_NS),
-			["System.SByte"] = ("byte", SYSTEM_NS),
-			["System.UInt16"] = ("unsignedShort", SYSTEM_NS),
-			["System.UInt32"] = ("unsignedInt", SYSTEM_NS),
-			["System.UInt64"] = ("unsignedLong", SYSTEM_NS),
-			["System.Decimal"] = ("decimal", SYSTEM_NS),
-			["System.Double"] = ("double", SYSTEM_NS),
-			["System.Single"] = ("float", SYSTEM_NS),
-			["System.DateTime"] = ("dateTime", SYSTEM_NS),
-			["System.Guid"] = ("guid", SERIALIZATION_NS),
-			["System.Char"] = ("char", SERIALIZATION_NS),
-			["System.TimeSpan"] = ("duration", SERIALIZATION_NS),
-			["System.Object"] = ("anyType", SERIALIZATION_NS)
+			["System.String"] = ("string", Namespaces.SYSTEM_NS),
+			["System.Boolean"] = ("boolean", Namespaces.SYSTEM_NS),
+			["System.Int16"] = ("short", Namespaces.SYSTEM_NS),
+			["System.Int32"] = ("int", Namespaces.SYSTEM_NS),
+			["System.Int64"] = ("long", Namespaces.SYSTEM_NS),
+			["System.Byte"] = ("byte", Namespaces.SYSTEM_NS),
+			["System.SByte"] = ("byte", Namespaces.SYSTEM_NS),
+			["System.UInt16"] = ("unsignedShort", Namespaces.SYSTEM_NS),
+			["System.UInt32"] = ("unsignedInt", Namespaces.SYSTEM_NS),
+			["System.UInt64"] = ("unsignedLong", Namespaces.SYSTEM_NS),
+			["System.Decimal"] = ("decimal", Namespaces.SYSTEM_NS),
+			["System.Double"] = ("double", Namespaces.SYSTEM_NS),
+			["System.Single"] = ("float", Namespaces.SYSTEM_NS),
+			["System.DateTime"] = ("dateTime", Namespaces.SYSTEM_NS),
+			["System.Guid"] = ("guid", Namespaces.SERIALIZATION_NS),
+			["System.Char"] = ("char", Namespaces.SERIALIZATION_NS),
+			["System.TimeSpan"] = ("duration", Namespaces.SERIALIZATION_NS),
+			["System.Object"] = ("anyType", Namespaces.SERIALIZATION_NS),
+			["System.Uri"] = ("anyUri", Namespaces.SERIALIZATION_NS),
 		};
 #pragma warning restore SA1008 // Opening parenthesis must be spaced correctly
 #pragma warning restore SA1009 // Closing parenthesis must be spaced correctly
@@ -56,7 +48,8 @@ namespace SoapCore.Meta
 
 		private readonly ServiceDescription _service;
 		private readonly string _baseUrl;
-		private readonly Binding _binding;
+
+		private readonly string[] _numbers = new string[] { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9" };
 
 		private readonly Dictionary<Type, string> _complexTypeToBuild = new Dictionary<Type, string>();
 		private readonly HashSet<Type> _complexTypeProcessed = new HashSet<Type>(); // Contains types that have been discovered
@@ -71,11 +64,21 @@ namespace SoapCore.Meta
 		private bool _buildDataTable;
 		private string _schemaNamespace;
 
-		public MetaWCFBodyWriter(ServiceDescription service, string baseUrl, Binding binding) : base(isBuffered: true)
+		[Obsolete]
+		public MetaWCFBodyWriter(ServiceDescription service, string baseUrl, Binding binding)
+			: this(
+				  service,
+				  baseUrl,
+				  binding?.Name ?? "BasicHttpBinding_" + service.GeneralContract.Name,
+				  binding.HasBasicAuth(),
+				  new[] { new SoapBindingInfo(binding.MessageVersion ?? MessageVersion.None, null, null) })
+		{
+		}
+
+		public MetaWCFBodyWriter(ServiceDescription service, string baseUrl, string bindingName, bool hasBasicAuthentication, SoapBindingInfo[] soapBindings) : base(isBuffered: true)
 		{
 			_service = service;
 			_baseUrl = baseUrl;
-			_binding = binding;
 
 			_arrayToBuild = new Queue<Type>();
 			_builtEnumTypes = new HashSet<string>();
@@ -83,30 +86,27 @@ namespace SoapCore.Meta
 			_buildArrayTypes = new HashSet<string>();
 			_builtSerializationElements = new HashSet<string>();
 
-			BindingType = service.Contracts.First().Name;
+			BindingType = service.GeneralContract.Name;
+			TargetNameSpace = service.GeneralContract.Namespace;
 
-			if (binding != null)
-			{
-				BindingName = binding.Name;
-				PortName = binding.Name;
-			}
-			else
-			{
-				BindingName = "BasicHttpBinding_" + _service.Contracts.First().Name;
-				PortName = "BasicHttpBinding_" + _service.Contracts.First().Name;
-			}
+			BindingName = bindingName;
+			PortName = bindingName;
+			HasBasicAuthentication = hasBasicAuthentication;
+			SoapBindings = soapBindings;
 		}
 
+		private SoapBindingInfo[] SoapBindings { get; }
+		private bool HasBasicAuthentication { get; }
 		private string BindingName { get; }
 		private string BindingType { get; }
 		private string PortName { get; }
-		private string TargetNameSpace => _service.Contracts.First().Namespace;
+		private string TargetNameSpace { get; }
 
 		protected override void OnWriteBodyContents(XmlDictionaryWriter writer)
 		{
 			AddTypes(writer);
 
-			AddMessage(writer);
+			AddMessages(writer);
 
 			AddPortType(writer);
 
@@ -122,18 +122,26 @@ namespace SoapCore.Meta
 				return @namespace;
 			}
 
-			return $"{DataContractNamespace}{@namespace}";
+			return $"{Namespaces.DataContractNamespace}{@namespace}";
 		}
 
 		private static string GetDataContractNamespace(Type type)
 		{
 			if (type.IsArray || typeof(IEnumerable).IsAssignableFrom(type))
 			{
-				type = type.IsArray ? type.GetElementType() : GetGenericType(type);
+				var collectionDataContractAttribute = type.GetCustomAttribute<CollectionDataContractAttribute>();
+				if (collectionDataContractAttribute != null && collectionDataContractAttribute.IsNamespaceSetExplicitly)
+				{
+					return collectionDataContractAttribute.Namespace;
+				}
+				else
+				{
+					type = type.IsArray ? type.GetElementType() : GetGenericType(type);
+				}
 			}
 
 			var dataContractAttribute = type.GetCustomAttribute<DataContractAttribute>();
-			if (dataContractAttribute != null && !string.IsNullOrEmpty(dataContractAttribute.Namespace))
+			if (dataContractAttribute != null && dataContractAttribute.IsNamespaceSetExplicitly)
 			{
 				return dataContractAttribute.Namespace;
 			}
@@ -143,8 +151,21 @@ namespace SoapCore.Meta
 
 		private static Type GetGenericType(Type collectionType)
 		{
+			return GetGenericTypes(collectionType).DefaultIfEmpty(typeof(object)).FirstOrDefault();
+		}
+
+		private static Type[] GetGenericTypes(Type collectionType)
+		{
 			// Recursively look through the base class to find the Generic Type of the Enumerable
 			var baseType = collectionType;
+
+			var collectionInterfaceTypeInfo = baseType.GetInterfaces().Where(a => a.Name == "ICollection`1").FirstOrDefault();
+			if (collectionInterfaceTypeInfo != null)
+			{
+				//handle Dictionary KeyValuePair's and other collections with more than one generic parameter as a simple return type
+				return collectionInterfaceTypeInfo.GetGenericArguments();
+			}
+
 			var baseTypeInfo = collectionType.GetTypeInfo();
 			while (!baseTypeInfo.IsGenericType && baseTypeInfo.BaseType != null)
 			{
@@ -152,49 +173,105 @@ namespace SoapCore.Meta
 				baseTypeInfo = baseType.GetTypeInfo();
 			}
 
-			return baseType.GetTypeInfo().GetGenericArguments().DefaultIfEmpty(typeof(object)).FirstOrDefault();
+			return baseType.GetTypeInfo().GetGenericArguments();
 		}
 
 		private string GetModelNamespace(Type type)
 		{
 			if (type != null && type.Namespace != _service.ServiceType.Namespace)
 			{
-				return $"{DataContractNamespace}{type.Namespace}";
+				return $"{Namespaces.DataContractNamespace}{type.Namespace}";
 			}
 
-			return $"{DataContractNamespace}{_service.ServiceType.Namespace}";
+			return $"{Namespaces.DataContractNamespace}{_service.ServiceType.Namespace}";
 		}
 
 		private void WriteParameters(XmlDictionaryWriter writer, SoapMethodParameterInfo[] parameterInfos)
 		{
 			foreach (var parameterInfo in parameterInfos)
 			{
+				if (parameterInfo.Parameter.ParameterType.FullName == "System.Threading.CancellationToken")
+					continue;
 				var elementAttribute = parameterInfo.Parameter.GetCustomAttribute<XmlElementAttribute>();
 				var parameterName = !string.IsNullOrEmpty(elementAttribute?.ElementName)
 										? elementAttribute.ElementName
 										: parameterInfo.Parameter.GetCustomAttribute<MessageParameterAttribute>()?.Name ?? parameterInfo.Parameter.Name;
-				AddSchemaType(writer, parameterInfo.Parameter.ParameterType, parameterName, objectNamespace: elementAttribute?.Namespace ?? (parameterInfo.Namespace != "http://tempuri.org/" ? parameterInfo.Namespace : null));
+				var isRequired = !parameterInfo.Parameter.IsOptional;
+				AddSchemaType(writer, parameterInfo.Parameter.ParameterType, parameterName, objectNamespace: GetDataContractNamespace(parameterInfo.Parameter.ParameterType), isRequired: isRequired);
 			}
 		}
 
-		private void AddOperations(XmlDictionaryWriter writer)
+		private void EnsureServiceKnownTypes(IEnumerable<ServiceKnownTypeAttribute> serviceKnownTypes)
 		{
-			writer.WriteStartElement("xs:schema");
+			foreach (ServiceKnownTypeAttribute knownType in serviceKnownTypes)
+			{
+				if (knownType.Type is not null)
+				{
+					AddKnownType(knownType.Type);
+				}
+				else if (knownType.DeclaringType is not null && !string.IsNullOrWhiteSpace(knownType.MethodName))
+				{
+					var method = knownType.DeclaringType.GetMethod(knownType.MethodName, BindingFlags.Static | BindingFlags.Public);
+					if (method is null)
+					{
+						throw new NotSupportedException($"Method `{knownType.MethodName}` doesn't exist on Type `{knownType.DeclaringType.FullName}`.");
+					}
+
+					var knownTypeList = method.Invoke(null, new object[]{(ICustomAttributeProvider)null}) as IEnumerable;
+					if (knownTypeList is null)
+					{
+						throw new NotSupportedException($"Method `{knownType.MethodName}` on Type `{knownType.DeclaringType.FullName}` returned null or not an IEnumerable.");
+					}
+
+					foreach (var type in knownTypeList.OfType<Type>())
+					{
+						if (type != null)
+						{
+							AddKnownType(type);
+						}
+					}
+				}
+				else
+				{
+					throw new NotSupportedException($"You must specify Type property or DeclaringType and MethodName properties of `{nameof(ServiceKnownTypeAttribute)}`.");
+				}
+			}
+		}
+
+		private void AddKnownType(Type type)
+		{
+			// Add service known type
+			_complexTypeToBuild[type] = GetDataContractNamespace(type);
+
+			// Discover type known types
+			DiscoverTypes(type, false);
+		}
+
+		private void AddContractOperations(XmlDictionaryWriter writer, ContractDescription contract)
+		{
+			IEnumerable<OperationDescription> operations = contract.Operations;
+
+			writer.WriteStartElement("xs", "schema", Namespaces.XMLNS_XSD);
 			writer.WriteAttributeString("elementFormDefault", "qualified");
-			writer.WriteAttributeString("targetNamespace", TargetNameSpace);
-			writer.WriteAttributeString("xmlns:xs", XMLNS_XS);
-			writer.WriteAttributeString("xmlns:ser", SERIALIZATION_NS);
+			writer.WriteAttributeString("targetNamespace", contract.Namespace);
+			writer.WriteXmlnsAttribute("xs", Namespaces.XMLNS_XSD);
+			writer.WriteXmlnsAttribute("ser", Namespaces.SERIALIZATION_NS);
 
 			_schemaNamespace = TargetNameSpace;
 			_namespaceCounter = 1;
 
 			//discovery all parameters types which namespaceses diff with service namespace
-			foreach (var operation in _service.Operations)
+			foreach (OperationDescription operation in operations)
 			{
+				// Ensure operation service known type attributes
+				EnsureServiceKnownTypes(operation.ServiceKnownTypes);
+
 				foreach (var parameter in operation.AllParameters)
 				{
 					var type = parameter.Parameter.ParameterType;
 					var typeInfo = type.GetTypeInfo();
+					if (typeInfo.FullName == "System.Threading.CancellationToken")
+						continue;
 					if (typeInfo.IsByRef)
 					{
 						type = typeInfo.GetElementType();
@@ -203,12 +280,12 @@ namespace SoapCore.Meta
 					if (TypeIsComplexForWsdl(type, out type))
 					{
 						_complexTypeToBuild[type] = GetDataContractNamespace(type);
-						DiscoveryTypesByProperties(type, true);
+						DiscoverTypes(type, true);
 					}
 					else if (type.IsEnum || Nullable.GetUnderlyingType(type)?.IsEnum == true)
 					{
 						_complexTypeToBuild[type] = GetDataContractNamespace(type);
-						DiscoveryTypesByProperties(type, true);
+						DiscoverTypes(type, true);
 					}
 				}
 
@@ -223,32 +300,32 @@ namespace SoapCore.Meta
 					if (TypeIsComplexForWsdl(returnType, out returnType))
 					{
 						_complexTypeToBuild[returnType] = GetDataContractNamespace(returnType);
-						DiscoveryTypesByProperties(returnType, true);
+						DiscoverTypes(returnType, true);
 					}
 					else if (returnType.IsEnum || Nullable.GetUnderlyingType(returnType)?.IsEnum == true)
 					{
 						_complexTypeToBuild[returnType] = GetDataContractNamespace(returnType);
-						DiscoveryTypesByProperties(returnType, true);
+						DiscoverTypes(returnType, true);
 					}
 				}
 			}
 
 			var groupedByNamespace = _complexTypeToBuild.GroupBy(x => x.Value).ToDictionary(x => x.Key, x => x.Select(k => k.Key));
 
-			foreach (var @namespace in groupedByNamespace.Keys.Where(x => x != null && x != _service.ServiceType.Namespace).Distinct())
+			foreach (var @namespace in groupedByNamespace.Keys.Where(x => x != null && x != _service.ServiceType.Namespace && x != contract.Namespace).Distinct())
 			{
-				writer.WriteStartElement("xs:import");
+				writer.WriteStartElement("xs", "import", Namespaces.XMLNS_XSD);
 				writer.WriteAttributeString("namespace", @namespace);
 				writer.WriteEndElement();
 			}
 
-			foreach (var operation in _service.Operations)
+			foreach (OperationDescription operation in operations)
 			{
 				// input parameters of operation
-				writer.WriteStartElement("xs:element");
+				writer.WriteStartElement("xs", "element", Namespaces.XMLNS_XSD);
 				writer.WriteAttributeString("name", operation.Name);
-				writer.WriteStartElement("xs:complexType");
-				writer.WriteStartElement("xs:sequence");
+				writer.WriteStartElement("xs", "complexType", Namespaces.XMLNS_XSD);
+				writer.WriteStartElement("xs", "sequence", Namespaces.XMLNS_XSD);
 
 				WriteParameters(writer, operation.InParameters);
 
@@ -257,10 +334,10 @@ namespace SoapCore.Meta
 				writer.WriteEndElement(); // xs:element
 
 				// output parameter / return of operation
-				writer.WriteStartElement("xs:element");
+				writer.WriteStartElement("xs", "element", Namespaces.XMLNS_XSD);
 				writer.WriteAttributeString("name", operation.Name + "Response");
-				writer.WriteStartElement("xs:complexType");
-				writer.WriteStartElement("xs:sequence");
+				writer.WriteStartElement("xs", "complexType", Namespaces.XMLNS_XSD);
+				writer.WriteStartElement("xs", "sequence", Namespaces.XMLNS_XSD);
 
 				if (operation.DispatchMethod.ReturnType != typeof(void) && operation.DispatchMethod.ReturnType != typeof(Task))
 				{
@@ -271,7 +348,8 @@ namespace SoapCore.Meta
 					}
 
 					var returnName = operation.DispatchMethod.ReturnParameter.GetCustomAttribute<MessageParameterAttribute>()?.Name ?? operation.Name + "Result";
-					AddSchemaType(writer, returnType, returnName, false, GetDataContractNamespace(returnType));
+					var isRequired = !operation.DispatchMethod.ReturnParameter.IsOptional;
+					AddSchemaType(writer, returnType, returnName, false, GetDataContractNamespace(returnType), isRequired: isRequired);
 				}
 
 				WriteParameters(writer, operation.OutParameters);
@@ -296,52 +374,65 @@ namespace SoapCore.Meta
 				}
 
 				_complexTypeToBuild[faultType] = GetDataContractNamespace(faultType);
-				DiscoveryTypesByProperties(faultType, true);
+				DiscoverTypes(faultType, true);
 			}
 		}
 
 		private void AddTypes(XmlDictionaryWriter writer)
 		{
-			writer.WriteStartElement("wsdl:types");
-			AddOperations(writer);
+			writer.WriteStartElement("wsdl", "types", Namespaces.WSDL_NS);
+
+			// Ensure service known type attributes
+			// TODO: should we parse only contact attributes ??
+			EnsureServiceKnownTypes(_service.ServiceKnownTypes);
+
+			// Ensure service contract service known type attributes
+			EnsureServiceKnownTypes(_service.Contracts.SelectMany(x => x.ServiceKnownTypes));
+
+			foreach (ContractDescription contract in _service.Contracts)
+			{
+				AddContractOperations(writer, contract);
+			}
+
 			AddMSSerialization(writer);
 			AddComplexTypes(writer);
 			AddArrayTypes(writer);
 			AddSystemTypes(writer);
-			writer.WriteEndElement(); // wsdl:types
+
+			writer.WriteEndElement();
 		}
 
 		private void AddSystemTypes(XmlDictionaryWriter writer)
 		{
 			if (_buildDateTimeOffset)
 			{
-				writer.WriteStartElement("xs:schema");
-				writer.WriteAttributeString("xmlns:xs", XMLNS_XS);
-				writer.WriteAttributeString("xmlns:tns", SYSTEM_NS);
+				writer.WriteStartElement("xs", "schema", Namespaces.XMLNS_XSD);
+				writer.WriteXmlnsAttribute("xs", Namespaces.XMLNS_XSD);
+				writer.WriteXmlnsAttribute("tns", Namespaces.SYSTEM_NS);
 				writer.WriteAttributeString("elementFormDefault", "qualified");
-				writer.WriteAttributeString("targetNamespace", SYSTEM_NS);
+				writer.WriteAttributeString("targetNamespace", Namespaces.SYSTEM_NS);
 
-				writer.WriteStartElement("xs:import");
-				writer.WriteAttributeString("namespace", SERIALIZATION_NS);
+				writer.WriteStartElement("xs", "import", Namespaces.XMLNS_XSD);
+				writer.WriteAttributeString("namespace", Namespaces.SERIALIZATION_NS);
 				writer.WriteEndElement();
 
-				writer.WriteStartElement("xs:complexType");
+				writer.WriteStartElement("xs", "complexType", Namespaces.XMLNS_XSD);
 				writer.WriteAttributeString("name", "DateTimeOffset");
-				writer.WriteStartElement("xs:annotation");
-				writer.WriteStartElement("xs:appinfo");
+				writer.WriteStartElement("xs", "annotation", Namespaces.XMLNS_XSD);
+				writer.WriteStartElement("xs", "appinfo", Namespaces.XMLNS_XSD);
 
-				writer.WriteElementString("IsValueType", SERIALIZATION_NS, "true");
+				writer.WriteElementString("IsValueType", Namespaces.SERIALIZATION_NS, "true");
 				writer.WriteEndElement(); // xs:appinfo
 				writer.WriteEndElement(); // xs:annotation
 
-				writer.WriteStartElement("xs:sequence");
+				writer.WriteStartElement("xs", "sequence", Namespaces.XMLNS_XSD);
 
-				writer.WriteStartElement("xs:element");
+				writer.WriteStartElement("xs", "element", Namespaces.XMLNS_XSD);
 				writer.WriteAttributeString("name", "DateTime");
 				writer.WriteAttributeString("type", "xs:dateTime");
 				writer.WriteEndElement();
 
-				writer.WriteStartElement("xs:element");
+				writer.WriteStartElement("xs", "element", Namespaces.XMLNS_XSD);
 				writer.WriteAttributeString("name", "OffsetMinutes");
 				writer.WriteAttributeString("type", "xs:short");
 				writer.WriteEndElement();
@@ -350,7 +441,7 @@ namespace SoapCore.Meta
 
 				writer.WriteEndElement(); // xs:complexType
 
-				writer.WriteStartElement("xs:element");
+				writer.WriteStartElement("xs", "element", Namespaces.XMLNS_XSD);
 				writer.WriteAttributeString("name", "DateTimeOffset");
 				writer.WriteAttributeString("nillable", "true");
 				writer.WriteAttributeString("type", "tns:DateTimeOffset");
@@ -361,38 +452,38 @@ namespace SoapCore.Meta
 
 			if (_buildDataTable)
 			{
-				writer.WriteStartElement("xs:schema");
+				writer.WriteStartElement("xs", "schema", Namespaces.XMLNS_XSD);
 				writer.WriteAttributeString("elementFormDefault", "qualified");
-				writer.WriteAttributeString("targetNamespace", "http://schemas.datacontract.org/2004/07/System.Data");
-				writer.WriteAttributeString("xmlns:xs", "http://www.w3.org/2001/XMLSchema");
-				writer.WriteAttributeString("xmlns:tns", "http://schemas.datacontract.org/2004/07/System.Data");
+				writer.WriteAttributeString("targetNamespace", Namespaces.SystemData_NS);
+				writer.WriteXmlnsAttribute("xs", Namespaces.XMLNS_XSD);
+				writer.WriteXmlnsAttribute("tns", Namespaces.SystemData_NS);
 
-				writer.WriteStartElement("xs:element");
+				writer.WriteStartElement("xs", "element", Namespaces.XMLNS_XSD);
 				writer.WriteAttributeString("name", "DataTable");
 				writer.WriteAttributeString("nillable", "true");
 
-				writer.WriteStartElement("xs:complexType");
-				writer.WriteStartElement("xs:annotation");
+				writer.WriteStartElement("xs", "complexType", Namespaces.XMLNS_XSD);
+				writer.WriteStartElement("xs", "annotation", Namespaces.XMLNS_XSD);
 
-				writer.WriteStartElement("xs:appinfo");
+				writer.WriteStartElement("xs", "appinfo", Namespaces.XMLNS_XSD);
 				writer.WriteStartElement("ActualType");
-				writer.WriteAttributeString("xmlns", "http://schemas.microsoft.com/2003/10/Serialization/");
+				writer.WriteAttributeString("xmlns", Namespaces.SERIALIZATION_NS);
 				writer.WriteAttributeString("Name", "DataTable");
-				writer.WriteAttributeString("Namespace", "http://schemas.datacontract.org/2004/07/System.Data");
+				writer.WriteAttributeString("Namespace", Namespaces.SystemData_NS);
 				writer.WriteEndElement(); //actual type
 				writer.WriteEndElement(); //appinfo
 				writer.WriteEndElement(); //annotation
 
-				writer.WriteStartElement("xs:sequence");
+				writer.WriteStartElement("xs", "sequence", Namespaces.XMLNS_XSD);
 
-				writer.WriteStartElement("xs:any");
+				writer.WriteStartElement("xs", "any", Namespaces.XMLNS_XSD);
 				writer.WriteAttributeString("minOccurs", "0");
 				writer.WriteAttributeString("maxOccurs", "unbounded");
-				writer.WriteAttributeString("namespace", "http://www.w3.org/2001/XMLSchema");
+				writer.WriteAttributeString("namespace", Namespaces.XMLNS_XSD);
 				writer.WriteAttributeString("processContents", "lax");
 				writer.WriteEndElement(); //any
 
-				writer.WriteStartElement("xs:any");
+				writer.WriteStartElement("xs", "any", Namespaces.XMLNS_XSD);
 				writer.WriteAttributeString("minOccurs", "1");
 				writer.WriteAttributeString("namespace", "urn:schemas-microsoft-com:xml-diffgram-v1");
 				writer.WriteAttributeString("processContents", "lax");
@@ -410,17 +501,17 @@ namespace SoapCore.Meta
 
 		private void AddArrayTypes(XmlDictionaryWriter writer)
 		{
-			writer.WriteStartElement("xs:schema");
-			writer.WriteAttributeString("xmlns:xs", XMLNS_XS);
-			writer.WriteAttributeString("xmlns:tns", ARRAYS_NS);
-			writer.WriteAttributeString("xmlns:ser", SERIALIZATION_NS);
+			writer.WriteStartElement("xs", "schema", Namespaces.XMLNS_XSD);
+			writer.WriteXmlnsAttribute("xs", Namespaces.XMLNS_XSD);
+			writer.WriteXmlnsAttribute("tns", Namespaces.ARRAYS_NS);
+			writer.WriteXmlnsAttribute("ser", Namespaces.SERIALIZATION_NS);
 			writer.WriteAttributeString("elementFormDefault", "qualified");
-			writer.WriteAttributeString("targetNamespace", ARRAYS_NS);
+			writer.WriteAttributeString("targetNamespace", Namespaces.ARRAYS_NS);
 			_namespaceCounter = 1;
-			_schemaNamespace = ARRAYS_NS;
+			_schemaNamespace = Namespaces.ARRAYS_NS;
 
-			writer.WriteStartElement("xs:import");
-			writer.WriteAttributeString("namespace", SERIALIZATION_NS);
+			writer.WriteStartElement("xs", "import", Namespaces.XMLNS_XSD);
+			writer.WriteAttributeString("namespace", Namespaces.SERIALIZATION_NS);
 			writer.WriteEndElement();
 
 			while (_arrayToBuild.Count > 0)
@@ -432,16 +523,16 @@ namespace SoapCore.Meta
 
 				if (!_buildArrayTypes.Contains(toBuildName))
 				{
-					writer.WriteStartElement("xs:complexType");
+					writer.WriteStartElement("xs", "complexType", Namespaces.XMLNS_XSD);
 					writer.WriteAttributeString("name", toBuildName);
 
-					writer.WriteStartElement("xs:sequence");
+					writer.WriteStartElement("xs", "sequence", Namespaces.XMLNS_XSD);
 					AddSchemaType(writer, elType, null, true);
 					writer.WriteEndElement(); // :sequence
 
 					writer.WriteEndElement(); // xs:complexType
 
-					writer.WriteStartElement("xs:element");
+					writer.WriteStartElement("xs", "element", Namespaces.XMLNS_XSD);
 					writer.WriteAttributeString("name", toBuildName);
 					writer.WriteAttributeString("nillable", "true");
 					writer.WriteAttributeString("type", "tns:" + toBuildName);
@@ -455,12 +546,12 @@ namespace SoapCore.Meta
 
 		private void AddMSSerialization(XmlDictionaryWriter writer)
 		{
-			writer.WriteStartElement("xs:schema");
+			writer.WriteStartElement("xs", "schema", Namespaces.XMLNS_XSD);
 			writer.WriteAttributeString("attributeFormDefault", "qualified");
 			writer.WriteAttributeString("elementFormDefault", "qualified");
-			writer.WriteAttributeString("targetNamespace", SERIALIZATION_NS);
-			writer.WriteAttributeString("xmlns:xs", XMLNS_XS);
-			writer.WriteAttributeString("xmlns:tns", SERIALIZATION_NS);
+			writer.WriteAttributeString("targetNamespace", Namespaces.SERIALIZATION_NS);
+			writer.WriteXmlnsAttribute("xs", Namespaces.XMLNS_XSD);
+			writer.WriteXmlnsAttribute("tns", Namespaces.SERIALIZATION_NS);
 			WriteSerializationElement(writer, "anyType", "xs:anyType", true);
 			WriteSerializationElement(writer, "anyURI", "xs:anyURI", true);
 			WriteSerializationElement(writer, "base64Binary", "xs:base64Binary", true);
@@ -481,52 +572,52 @@ namespace SoapCore.Meta
 			WriteSerializationElement(writer, "unsignedShort", "xs:unsignedShort", true);
 
 			WriteSerializationElement(writer, "char", "tns:char", true);
-			writer.WriteStartElement("xs:simpleType");
+			writer.WriteStartElement("xs", "simpleType", Namespaces.XMLNS_XSD);
 			writer.WriteAttributeString("name", "char");
-			writer.WriteStartElement("xs:restriction");
+			writer.WriteStartElement("xs", "restriction", Namespaces.XMLNS_XSD);
 			writer.WriteAttributeString("base", "xs:int");
 			writer.WriteEndElement();
 			writer.WriteEndElement();
 
 			WriteSerializationElement(writer, "duration", "tns:duration", true);
-			writer.WriteStartElement("xs:simpleType");
+			writer.WriteStartElement("xs", "simpleType", Namespaces.XMLNS_XSD);
 			writer.WriteAttributeString("name", "duration");
-			writer.WriteStartElement("xs:restriction");
+			writer.WriteStartElement("xs", "restriction", Namespaces.XMLNS_XSD);
 			writer.WriteAttributeString("base", "xs:duration");
-			writer.WriteStartElement("xs:pattern");
+			writer.WriteStartElement("xs", "pattern", Namespaces.XMLNS_XSD);
 			writer.WriteAttributeString("value", @"\-?P(\d*D)?(T(\d*H)?(\d*M)?(\d*(\.\d*)?S)?)?");
 			writer.WriteEndElement();
-			writer.WriteStartElement("xs:minInclusive");
+			writer.WriteStartElement("xs", "minInclusive", Namespaces.XMLNS_XSD);
 			writer.WriteAttributeString("value", @"-P10675199DT2H48M5.4775808S");
 			writer.WriteEndElement();
-			writer.WriteStartElement("xs:maxInclusive");
+			writer.WriteStartElement("xs", "maxInclusive", Namespaces.XMLNS_XSD);
 			writer.WriteAttributeString("value", @"P10675199DT2H48M5.4775807S");
 			writer.WriteEndElement();
 			writer.WriteEndElement();
 			writer.WriteEndElement();
 
 			WriteSerializationElement(writer, "guid", "tns:guid", true);
-			writer.WriteStartElement("xs:simpleType");
+			writer.WriteStartElement("xs", "simpleType", Namespaces.XMLNS_XSD);
 			writer.WriteAttributeString("name", "guid");
-			writer.WriteStartElement("xs:restriction");
+			writer.WriteStartElement("xs", "restriction", Namespaces.XMLNS_XSD);
 			writer.WriteAttributeString("base", "xs:string");
-			writer.WriteStartElement("xs:pattern");
+			writer.WriteStartElement("xs", "pattern", Namespaces.XMLNS_XSD);
 			writer.WriteAttributeString("value", @"[\da-fA-F]{8}-[\da-fA-F]{4}-[\da-fA-F]{4}-[\da-fA-F]{4}-[\da-fA-F]{12}");
 			writer.WriteEndElement();
 			writer.WriteEndElement();
 			writer.WriteEndElement();
 
-			writer.WriteStartElement("xs:attribute");
+			writer.WriteStartElement("xs", "attribute", Namespaces.XMLNS_XSD);
 			writer.WriteAttributeString("name", "FactoryType");
 			writer.WriteAttributeString("type", "xs:QName");
 			writer.WriteEndElement();
 
-			writer.WriteStartElement("xs:attribute");
+			writer.WriteStartElement("xs", "attribute", Namespaces.XMLNS_XSD);
 			writer.WriteAttributeString("name", "Id");
 			writer.WriteAttributeString("type", "xs:ID");
 			writer.WriteEndElement();
 
-			writer.WriteStartElement("xs:attribute");
+			writer.WriteStartElement("xs", "attribute", Namespaces.XMLNS_XSD);
 			writer.WriteAttributeString("name", "Ref");
 			writer.WriteAttributeString("type", "xs:IDREF");
 			writer.WriteEndElement();
@@ -538,7 +629,7 @@ namespace SoapCore.Meta
 		{
 			if (!_builtSerializationElements.Contains(name))
 			{
-				writer.WriteStartElement("xs:element");
+				writer.WriteStartElement("xs", "element", Namespaces.XMLNS_XSD);
 				writer.WriteAttributeString("name", name);
 				writer.WriteAttributeString("nillable", nillable ? "true" : "false");
 				writer.WriteAttributeString("type", type);
@@ -553,29 +644,29 @@ namespace SoapCore.Meta
 			foreach (var type in _complexTypeToBuild.ToArray())
 			{
 				_complexTypeToBuild[type.Key] = GetDataContractNamespace(type.Key);
-				DiscoveryTypesByProperties(type.Key, true);
+				DiscoverTypes(type.Key, true);
 			}
 
 			var groupedByNamespace = _complexTypeToBuild.GroupBy(x => x.Value).ToDictionary(x => x.Key, x => x.Select(k => k.Key));
 
 			foreach (var types in groupedByNamespace.Distinct())
 			{
-				writer.WriteStartElement("xs:schema");
+				writer.WriteStartElement("xs", "schema", Namespaces.XMLNS_XSD);
 				writer.WriteAttributeString("elementFormDefault", "qualified");
 				writer.WriteAttributeString("targetNamespace", GetModelNamespace(types.Key));
-				writer.WriteAttributeString("xmlns:xs", XMLNS_XS);
-				writer.WriteAttributeString("xmlns:tns", GetModelNamespace(types.Key));
-				writer.WriteAttributeString("xmlns:ser", SERIALIZATION_NS);
+				writer.WriteXmlnsAttribute("xs", Namespaces.XMLNS_XSD);
+				writer.WriteXmlnsAttribute("tns", GetModelNamespace(types.Key));
+				writer.WriteXmlnsAttribute("ser", Namespaces.SERIALIZATION_NS);
 
 				_namespaceCounter = 1;
 				_schemaNamespace = GetModelNamespace(types.Key);
 
-				writer.WriteStartElement("xs:import");
-				writer.WriteAttributeString("namespace", SYSTEM_NS);
+				writer.WriteStartElement("xs", "import", Namespaces.XMLNS_XSD);
+				writer.WriteAttributeString("namespace", Namespaces.SYSTEM_NS);
 				writer.WriteEndElement();
 
-				writer.WriteStartElement("xs:import");
-				writer.WriteAttributeString("namespace", ARRAYS_NS);
+				writer.WriteStartElement("xs", "import", Namespaces.XMLNS_XSD);
+				writer.WriteAttributeString("namespace", Namespaces.ARRAYS_NS);
 				writer.WriteEndElement();
 
 				foreach (var type in types.Value.Distinct(new TypesComparer(GetTypeName)))
@@ -589,7 +680,7 @@ namespace SoapCore.Meta
 						WriteComplexType(writer, type);
 					}
 
-					writer.WriteStartElement("xs:element");
+					writer.WriteStartElement("xs", "element", Namespaces.XMLNS_XSD);
 					writer.WriteAttributeString("name", GetTypeName(type));
 					if (!type.IsEnum || Nullable.GetUnderlyingType(type) != null)
 					{
@@ -604,7 +695,7 @@ namespace SoapCore.Meta
 			}
 		}
 
-		private void DiscoveryTypesByProperties(Type type, bool isRootType)
+		private void DiscoverTypes(Type type, bool isRootType)
 		{
 			//guard against infinity recursion
 			//check is made against _complexTypeProcessed, which contains types that have been
@@ -622,48 +713,105 @@ namespace SoapCore.Meta
 			//type will be processed, so can be added to _complexTypeProcessed
 			_complexTypeProcessed.Add(type);
 
-			if (HasBaseType(type) && type.BaseType != null)
+			// discover known types
+			IEnumerable<KnownTypeAttribute> knownTypes = type.GetCustomAttributes<KnownTypeAttribute>(inherit: false);
+			foreach (KnownTypeAttribute knownType in knownTypes)
 			{
-				_complexTypeToBuild[type.BaseType] = GetDataContractNamespace(type.BaseType);
-				DiscoveryTypesByProperties(type.BaseType, false);
-			}
-
-			foreach (var property in type.GetProperties().Where(prop =>
-						prop.DeclaringType == type
-						&& prop.CustomAttributes.All(attr => attr.AttributeType.Name != "IgnoreDataMemberAttribute")
-						&& !prop.PropertyType.IsPrimitive
-						&& !SysTypeDic.ContainsKey(prop.PropertyType.FullName)
-						&& prop.PropertyType != typeof(ValueType)
-						&& prop.PropertyType != typeof(DateTimeOffset)))
-			{
-				Type propertyType;
-				var underlyingType = Nullable.GetUnderlyingType(property.PropertyType);
-
-				if (Nullable.GetUnderlyingType(property.PropertyType) != null)
+				if (knownType.Type is not null)
 				{
-					propertyType = underlyingType;
+					// add known type
+					_complexTypeToBuild[knownType.Type] = GetDataContractNamespace(knownType.Type);
+
+					// discover recursive
+					DiscoverTypes(knownType.Type, false);
 				}
-				else if (property.PropertyType.IsArray || typeof(IEnumerable).IsAssignableFrom(property.PropertyType))
+				else if (!string.IsNullOrWhiteSpace(knownType.MethodName))
 				{
-					propertyType = property.PropertyType.IsArray
-						? property.PropertyType.GetElementType()
-						: GetGenericType(property.PropertyType);
-					_complexTypeToBuild[property.PropertyType] = GetDataContractNamespace(property.PropertyType);
+					var method = type.GetMethod(knownType.MethodName, BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+					if (method is null)
+					{
+						throw new NotSupportedException($"Method `{knownType.MethodName}` doesn't exist on Type `{type.FullName}`.");
+					}
+
+					var knownTypeList = method.Invoke(null, new object[0]) as IEnumerable;
+					if (knownTypeList is null)
+					{
+						throw new NotSupportedException($"Method `{knownType.MethodName}` on Type `{type.FullName}` returned null or not an IEnumerable.");
+					}
+
+					foreach (var item in knownTypeList.OfType<Type>())
+					{
+						if (item != null)
+						{
+							// add known type
+							_complexTypeToBuild[item] = GetDataContractNamespace(item);
+
+							// discover recursive
+							DiscoverTypes(item, false);
+						}
+					}
 				}
 				else
 				{
-					propertyType = property.PropertyType;
+					throw new NotSupportedException($"You must specify Type property or MethodName properties of `{nameof(KnownTypeAttribute)}`.");
+				}
+			}
+
+			if (HasBaseType(type) && type.BaseType != null)
+			{
+				_complexTypeToBuild[type.BaseType] = GetDataContractNamespace(type.BaseType);
+				DiscoverTypes(type.BaseType, false);
+			}
+
+			if ((type.IsArray || typeof(IEnumerable).IsAssignableFrom(type)) && type.IsGenericType)
+			{
+				var genericType = GetGenericType(type);
+				var (name, _) = ResolveSystemType(genericType);
+				if (string.IsNullOrEmpty(name))
+				{
+					_complexTypeToBuild[genericType] = GetDataContractNamespace(genericType);
+					DiscoverTypes(genericType, true);
+				}
+			}
+
+			foreach (var member in type.GetPropertyOrFieldMembers().Where(mi =>
+						mi.DeclaringType == type
+						&& mi.CustomAttributes.All(attr => attr.AttributeType.Name != "IgnoreDataMemberAttribute")
+						&& (!mi.DeclaringType.CustomAttributes.Any(x => x.AttributeType == typeof(DataContractAttribute))
+							|| mi.CustomAttributes.Any(x => x.AttributeType == typeof(DataMemberAttribute)))
+						&& !mi.GetPropertyOrFieldType().IsPrimitive
+						&& !SysTypeDic.ContainsKey(mi.GetPropertyOrFieldType().FullName)
+						&& mi.GetPropertyOrFieldType() != typeof(ValueType)
+						&& mi.GetPropertyOrFieldType() != typeof(DateTimeOffset)))
+			{
+				Type memberType;
+				var underlyingType = Nullable.GetUnderlyingType(member.GetPropertyOrFieldType());
+
+				if (Nullable.GetUnderlyingType(member.GetPropertyOrFieldType()) != null)
+				{
+					memberType = underlyingType;
+				}
+				else if (member.GetPropertyOrFieldType().IsArray || typeof(IEnumerable).IsAssignableFrom(member.GetPropertyOrFieldType()))
+				{
+					memberType = member.GetPropertyOrFieldType().IsArray
+						? member.GetPropertyOrFieldType().GetElementType()
+						: GetGenericType(member.GetPropertyOrFieldType());
+					_complexTypeToBuild[member.GetPropertyOrFieldType()] = GetDataContractNamespace(member.GetPropertyOrFieldType());
+				}
+				else
+				{
+					memberType = member.GetPropertyOrFieldType();
 				}
 
-				if (propertyType != null && !propertyType.IsPrimitive && !SysTypeDic.ContainsKey(propertyType.FullName))
+				if (memberType != null && !memberType.IsPrimitive && !SysTypeDic.ContainsKey(memberType.FullName))
 				{
-					if (propertyType == type)
+					if (memberType == type)
 					{
 						continue;
 					}
 
-					_complexTypeToBuild[propertyType] = GetDataContractNamespace(propertyType);
-					DiscoveryTypesByProperties(propertyType, false);
+					_complexTypeToBuild[memberType] = GetDataContractNamespace(memberType);
+					DiscoverTypes(memberType, false);
 				}
 			}
 		}
@@ -679,14 +827,14 @@ namespace SoapCore.Meta
 
 			if (!_builtEnumTypes.Contains(typeName))
 			{
-				writer.WriteStartElement("xs:simpleType");
+				writer.WriteStartElement("xs", "simpleType", Namespaces.XMLNS_XSD);
 				writer.WriteAttributeString("name", typeName);
-				writer.WriteStartElement("xs:restriction ");
+				writer.WriteStartElement("xs", "restriction", Namespaces.XMLNS_XSD);
 				writer.WriteAttributeString("base", "xs:string");
 
 				foreach (var name in Enum.GetNames(type))
 				{
-					writer.WriteStartElement("xs:enumeration ");
+					writer.WriteStartElement("xs", "enumeration", Namespaces.XMLNS_XSD);
 
 					// Search for EnumMember attribute. If available, get enum value from its Value field
 					var enumMemberAttribute = ((EnumMemberAttribute[])type.GetField(name).GetCustomAttributes(typeof(EnumMemberAttribute), true)).SingleOrDefault();
@@ -709,34 +857,45 @@ namespace SoapCore.Meta
 		{
 			var toBuildName = GetTypeName(type);
 
-			if (_builtComplexTypes.Contains(toBuildName))
+			if (_builtComplexTypes.Contains(type.FullName))
 			{
 				return;
 			}
 
-			writer.WriteStartElement("xs:complexType");
+			writer.WriteStartElement("xs", "complexType", Namespaces.XMLNS_XSD);
 			writer.WriteAttributeString("name", toBuildName);
-			writer.WriteAttributeString("xmlns:ser", SERIALIZATION_NS);
+			writer.WriteAttributeString("xmlns", "ser", null, Namespaces.SERIALIZATION_NS);
+
+			if (type.IsValueType && ResolveSystemType(type).name == null)
+			{
+				writer.WriteStartElement("xs", "annotation", Namespaces.XMLNS_XSD);
+				writer.WriteStartElement("xs", "appinfo", Namespaces.XMLNS_XSD);
+				writer.WriteStartElement("IsValueType", Namespaces.SERIALIZATION_NS);
+				writer.WriteValue(true);
+				writer.WriteEndElement();
+				writer.WriteEndElement();
+				writer.WriteEndElement();
+			}
 
 			var hasBaseType = HasBaseType(type);
 
 			if (hasBaseType)
 			{
-				writer.WriteStartElement("xs:complexContent");
+				writer.WriteStartElement("xs", "complexContent", Namespaces.XMLNS_XSD);
 
 				writer.WriteAttributeString("mixed", "false");
 
-				writer.WriteStartElement("xs:extension");
+				writer.WriteStartElement("xs", "extension", Namespaces.XMLNS_XSD);
 
 				var modelNamespace = GetDataContractNamespace(type.BaseType);
 
-				var typeName = type.BaseType.Name;
+				var typeName = GetTypeName(type.BaseType);
 
 				if (_schemaNamespace != modelNamespace)
 				{
 					var ns = $"q{_namespaceCounter++}";
 					writer.WriteAttributeString("base", $"{ns}:{typeName}");
-					writer.WriteAttributeString($"xmlns:{ns}", modelNamespace);
+					writer.WriteAttributeString("xmlns", ns, null, modelNamespace);
 				}
 				else
 				{
@@ -744,36 +903,47 @@ namespace SoapCore.Meta
 				}
 			}
 
-			writer.WriteStartElement("xs:sequence");
+			writer.WriteStartElement("xs", "sequence", Namespaces.XMLNS_XSD);
 
 			if (type.IsArray || typeof(IEnumerable).IsAssignableFrom(type))
 			{
 				var elementType = type.IsArray ? type.GetElementType() : GetGenericType(type);
-				AddSchemaType(writer, elementType, null, true, GetDataContractNamespace(type));
+
+				string elementName = null;
+				var collectionDataContractAttribute = type.GetCustomAttribute<CollectionDataContractAttribute>();
+				if (collectionDataContractAttribute != null && collectionDataContractAttribute.IsItemNameSetExplicitly)
+				{
+					elementName = collectionDataContractAttribute.ItemName;
+				}
+
+				AddSchemaType(writer, elementType, elementName, true, GetDataContractNamespace(type));
 			}
 			else
 			{
-				var properties = type.GetProperties().Where(prop =>
-					prop.DeclaringType == type &&
-					prop.CustomAttributes.All(attr => attr.AttributeType.Name != "IgnoreDataMemberAttribute"));
+				var propertyOrFieldMembers = type.GetPropertyOrFieldMembers().Where(mi =>
+					mi.DeclaringType == type
+					&& mi.CustomAttributes.All(attr => attr.AttributeType.Name != "IgnoreDataMemberAttribute")
+					&& (!mi.DeclaringType.CustomAttributes.Any(x => x.AttributeType == typeof(DataContractAttribute))
+						|| mi.CustomAttributes.Any(x => x.AttributeType == typeof(DataMemberAttribute))));
 
 				var dataMembersToWrite = new List<DataMemberDescription>();
 
 				//TODO: base type properties
 				//TODO: enforce order attribute parameters
-				foreach (var property in properties)
+				foreach (var member in propertyOrFieldMembers)
 				{
-					var propertyName = property.Name;
+					var memberName = member.Name;
 
-					var attributes = property.GetCustomAttributes(true);
+					var attributes = member.GetCustomAttributes(true);
 					int order = 0;
+					bool isRequired = false;
 					foreach (var attr in attributes)
 					{
 						if (attr is DataMemberAttribute dataContractAttribute)
 						{
-							if (!string.IsNullOrEmpty(dataContractAttribute.Name))
+							if (dataContractAttribute.IsNameSetExplicitly)
 							{
-								propertyName = dataContractAttribute.Name;
+								memberName = dataContractAttribute.Name;
 							}
 
 							if (dataContractAttribute.Order > 0)
@@ -781,21 +951,24 @@ namespace SoapCore.Meta
 								order = dataContractAttribute.Order;
 							}
 
+							isRequired = dataContractAttribute.IsRequired;
+
 							break;
 						}
 					}
 
 					dataMembersToWrite.Add(new DataMemberDescription
 					{
-						Name = propertyName,
-						Type = property.PropertyType,
-						Order = order
+						Name = memberName,
+						Type = member.GetPropertyOrFieldType(),
+						Order = order,
+						IsRequired = isRequired
 					});
 				}
 
 				foreach (var p in dataMembersToWrite.OrderBy(x => x.Order).ThenBy(p => p.Name, StringComparer.Ordinal))
 				{
-					AddSchemaType(writer, p.Type, p.Name, false, GetDataContractNamespace(p.Type));
+					AddSchemaType(writer, p.Type, p.Name, false, GetDataContractNamespace(p.Type), p.IsRequired);
 				}
 			}
 
@@ -809,30 +982,53 @@ namespace SoapCore.Meta
 
 			writer.WriteEndElement(); // xs:complexType
 
-			_builtComplexTypes.Add(toBuildName);
+			_builtComplexTypes.Add(type.FullName);
 		}
 
-		private void AddMessage(XmlDictionaryWriter writer)
+		private void AddMessages(XmlDictionaryWriter writer)
 		{
 			foreach (var operation in _service.Operations)
 			{
 				// input
-				writer.WriteStartElement("wsdl:message");
+				writer.WriteStartElement("wsdl", "message", Namespaces.WSDL_NS);
 				writer.WriteAttributeString("name", $"{BindingType}_{operation.Name}_InputMessage");
-				writer.WriteStartElement("wsdl:part");
+				writer.WriteStartElement("wsdl", "part", Namespaces.WSDL_NS);
 				writer.WriteAttributeString("name", "parameters");
-				writer.WriteAttributeString("element", "tns:" + operation.Name);
+
+				string inputElement = "tns:" + operation.Name;
+				if (operation.Contract.Name != BindingType)
+				{
+					var ns = $"q{_namespaceCounter++}";
+					writer.WriteXmlnsAttribute($"{ns}", operation.Contract.Namespace);
+
+					inputElement = $"{ns}:{operation.Name}";
+				}
+
+				writer.WriteAttributeString("element", inputElement);
 				writer.WriteEndElement(); // wsdl:part
 				writer.WriteEndElement(); // wsdl:message
 
 				// output
-				writer.WriteStartElement("wsdl:message");
-				writer.WriteAttributeString("name", $"{BindingType}_{operation.Name}_OutputMessage");
-				writer.WriteStartElement("wsdl:part");
-				writer.WriteAttributeString("name", "parameters");
-				writer.WriteAttributeString("element", "tns:" + operation.Name + "Response");
-				writer.WriteEndElement(); // wsdl:part
-				writer.WriteEndElement(); // wsdl:message
+				if (!operation.IsOneWay)
+				{
+					writer.WriteStartElement("wsdl", "message", Namespaces.WSDL_NS);
+					writer.WriteAttributeString("name", $"{BindingType}_{operation.Name}_OutputMessage");
+					writer.WriteStartElement("wsdl", "part", Namespaces.WSDL_NS);
+					writer.WriteAttributeString("name", "parameters");
+
+					string outputElement = "tns:" + operation.Name + "Response";
+					if (operation.Contract.Name != BindingType)
+					{
+						var ns = $"q{_namespaceCounter++}";
+						writer.WriteXmlnsAttribute($"{ns}", operation.Contract.Namespace);
+
+						outputElement = $"{ns}:{operation.Name}Response";
+					}
+
+					writer.WriteAttributeString("element", outputElement);
+					writer.WriteEndElement(); // wsdl:part
+					writer.WriteEndElement(); // wsdl:message
+				}
 
 				AddMessageFaults(writer, operation);
 			}
@@ -842,13 +1038,13 @@ namespace SoapCore.Meta
 		{
 			foreach (Type fault in operation.Faults)
 			{
-				writer.WriteStartElement("wsdl:message");
+				writer.WriteStartElement("wsdl", "message", Namespaces.WSDL_NS);
 				writer.WriteAttributeString("name", $"{BindingType}_{operation.Name}_{fault.Name}Fault_FaultMessage");
-				writer.WriteStartElement("wsdl:part");
+				writer.WriteStartElement("wsdl", "part", Namespaces.WSDL_NS);
 				writer.WriteAttributeString("name", "detail");
 				var ns = $"q{_namespaceCounter++}";
 				writer.WriteAttributeString("element", $"{ns}:{fault.Name}");
-				writer.WriteAttributeString($"xmlns:{ns}", GetDataContractNamespace(fault));
+				writer.WriteAttributeString("xmlns", ns, null, GetDataContractNamespace(fault));
 				writer.WriteEndElement(); // wsdl:part
 				writer.WriteEndElement(); // wsdl:message
 			}
@@ -856,20 +1052,24 @@ namespace SoapCore.Meta
 
 		private void AddPortType(XmlDictionaryWriter writer)
 		{
-			writer.WriteStartElement("wsdl:portType");
+			writer.WriteStartElement("wsdl", "portType", Namespaces.WSDL_NS);
 			writer.WriteAttributeString("name", BindingType);
 			foreach (var operation in _service.Operations)
 			{
-				writer.WriteStartElement("wsdl:operation");
+				writer.WriteStartElement("wsdl", "operation", Namespaces.WSDL_NS);
 				writer.WriteAttributeString("name", operation.Name);
-				writer.WriteStartElement("wsdl:input");
-				writer.WriteAttributeString("wsam:Action", operation.SoapAction);
+				writer.WriteStartElement("wsdl", "input", Namespaces.WSDL_NS);
+				writer.WriteAttributeString("wsam", "Action", Namespaces.WSAM_NS, operation.SoapAction);
 				writer.WriteAttributeString("message", $"tns:{BindingType}_{operation.Name}_InputMessage");
 				writer.WriteEndElement(); // wsdl:input
-				writer.WriteStartElement("wsdl:output");
-				writer.WriteAttributeString("wsam:Action", operation.SoapAction + "Response");
-				writer.WriteAttributeString("message", $"tns:{BindingType}_{operation.Name}_OutputMessage");
-				writer.WriteEndElement(); // wsdl:output
+
+				if (!operation.IsOneWay)
+				{
+					writer.WriteStartElement("wsdl", "output", Namespaces.WSDL_NS);
+					writer.WriteAttributeString("wsam", "Action", Namespaces.WSAM_NS, operation.SoapAction + "Response");
+					writer.WriteAttributeString("message", $"tns:{BindingType}_{operation.Name}_OutputMessage");
+					writer.WriteEndElement(); // wsdl:output
+				}
 
 				AddPortTypeFaults(writer, operation);
 
@@ -883,69 +1083,70 @@ namespace SoapCore.Meta
 		{
 			foreach (Type fault in operation.Faults)
 			{
-				writer.WriteStartElement("wsdl:fault");
-				writer.WriteAttributeString("wsam:Action", $"{operation.SoapAction}{fault.Name}Fault");
+				writer.WriteStartElement("wsdl", "fault", Namespaces.WSDL_NS);
+				writer.WriteAttributeString("wsam", "Action", Namespaces.WSAM_NS, $"{operation.SoapAction}{fault.Name}Fault");
 				writer.WriteAttributeString("name", $"{fault.Name}Fault");
-				writer.WriteAttributeString("message", $"tns:{BindingType}_{operation.Name}_{fault.Name}Fault_FaultMessage");
+				writer.WriteAttributeString("message", $"tns:{_service.GeneralContract.Name}_{operation.Name}_{fault.Name}Fault_FaultMessage");
 				writer.WriteEndElement(); // wsdl:fault
 			}
 		}
 
 		private void AddBinding(XmlDictionaryWriter writer)
 		{
-			writer.WriteStartElement("wsdl:binding");
-			writer.WriteAttributeString("name", BindingName);
-			writer.WriteAttributeString("type", "tns:" + BindingType);
-
-			if (_binding.HasBasicAuth())
+			foreach (var bindingInfo in SoapBindings)
 			{
-				writer.WriteStartElement("wsp:PolicyReference");
-				writer.WriteAttributeString("URI", $"#{_binding.Name}_{_service.Contracts.First().Name}_policy");
-				writer.WriteEndElement();
+				(var soap, var soapNamespace, var qualifiedBindingName, _) = GetSoapMetaParameters(bindingInfo);
+
+				writer.WriteStartElement("wsdl", "binding", Namespaces.WSDL_NS);
+				writer.WriteAttributeString("name", BindingName);
+				writer.WriteAttributeString("type", "tns:" + BindingType);
+
+				writer.WriteStartElement(soap, "binding", soapNamespace);
+				writer.WriteAttributeString("transport", Namespaces.TRANSPORT_SCHEMA);
+				writer.WriteEndElement(); // soap:binding
+
+				foreach (var operation in _service.Operations)
+				{
+					writer.WriteStartElement("wsdl", "operation", Namespaces.WSDL_NS);
+					writer.WriteAttributeString("name", operation.Name);
+
+					writer.WriteStartElement(soap, "operation", soapNamespace);
+					writer.WriteAttributeString("soapAction", operation.SoapAction);
+					writer.WriteAttributeString("style", "document");
+					writer.WriteEndElement(); // soap:operation
+
+					writer.WriteStartElement("wsdl", "input", Namespaces.WSDL_NS);
+					writer.WriteStartElement(soap, "body", soapNamespace);
+					writer.WriteAttributeString("use", "literal");
+					writer.WriteEndElement(); // soap:body
+					writer.WriteEndElement(); // wsdl:input
+
+					if (!operation.IsOneWay)
+					{
+						writer.WriteStartElement("wsdl", "output", Namespaces.WSDL_NS);
+						writer.WriteStartElement(soap, "body", soapNamespace);
+						writer.WriteAttributeString("use", "literal");
+						writer.WriteEndElement(); // soap:body
+						writer.WriteEndElement(); // wsdl:output
+					}
+
+					AddBindingFaults(writer, operation, soap, soapNamespace);
+
+					writer.WriteEndElement(); // wsdl:operation
+				}
+
+				writer.WriteEndElement(); // wsdl:binding
 			}
-
-			writer.WriteStartElement("soap:binding");
-			writer.WriteAttributeString("transport", TRANSPORT_SCHEMA);
-			writer.WriteEndElement(); // soap:binding
-
-			foreach (var operation in _service.Operations)
-			{
-				writer.WriteStartElement("wsdl:operation");
-				writer.WriteAttributeString("name", operation.Name);
-
-				writer.WriteStartElement("soap:operation");
-				writer.WriteAttributeString("soapAction", operation.SoapAction);
-				writer.WriteAttributeString("style", "document");
-				writer.WriteEndElement(); // soap:operation
-
-				writer.WriteStartElement("wsdl:input");
-				writer.WriteStartElement("soap:body");
-				writer.WriteAttributeString("use", "literal");
-				writer.WriteEndElement(); // soap:body
-				writer.WriteEndElement(); // wsdl:input
-
-				writer.WriteStartElement("wsdl:output");
-				writer.WriteStartElement("soap:body");
-				writer.WriteAttributeString("use", "literal");
-				writer.WriteEndElement(); // soap:body
-				writer.WriteEndElement(); // wsdl:output
-
-				AddBindingFaults(writer, operation);
-
-				writer.WriteEndElement(); // wsdl:operation
-			}
-
-			writer.WriteEndElement(); // wsdl:binding
 		}
 
-		private void AddBindingFaults(XmlDictionaryWriter writer, OperationDescription operation)
+		private void AddBindingFaults(XmlDictionaryWriter writer, OperationDescription operation, string soap, string soapNamespace)
 		{
 			foreach (Type fault in operation.Faults)
 			{
-				writer.WriteStartElement("wsdl:fault");
+				writer.WriteStartElement("wsdl", "fault", Namespaces.WSDL_NS);
 				writer.WriteAttributeString("name", $"{fault.Name}Fault");
 
-				writer.WriteStartElement("soap:fault");
+				writer.WriteStartElement(soap, "fault", soapNamespace);
 				writer.WriteAttributeString("use", "literal");
 				writer.WriteAttributeString("name", $"{fault.Name}Fault");
 				writer.WriteEndElement(); // soap:fault
@@ -956,22 +1157,27 @@ namespace SoapCore.Meta
 
 		private void AddService(XmlDictionaryWriter writer)
 		{
-			writer.WriteStartElement("wsdl:service");
-			writer.WriteAttributeString("name", _service.ServiceType.Name);
+			writer.WriteStartElement("wsdl", "service", Namespaces.WSDL_NS);
+			writer.WriteAttributeString("name", _service.ServiceName);
 
-			writer.WriteStartElement("wsdl:port");
-			writer.WriteAttributeString("name", PortName);
-			writer.WriteAttributeString("binding", "tns:" + BindingName);
+			foreach (var bindingInfo in SoapBindings)
+			{
+				(var soap, var soapNamespace, var qualifiedBindingName, var qualifiedPortName) = GetSoapMetaParameters(bindingInfo);
 
-			writer.WriteStartElement("soap:address");
+				writer.WriteStartElement("wsdl", "port", Namespaces.WSDL_NS);
+				writer.WriteAttributeString("name", qualifiedPortName);
+				writer.WriteAttributeString("binding", "tns:" + qualifiedBindingName);
 
-			writer.WriteAttributeString("location", _baseUrl);
-			writer.WriteEndElement(); // soap:address
+				writer.WriteStartElement(soap, "address", soapNamespace);
 
-			writer.WriteEndElement(); // wsdl:port
+				writer.WriteAttributeString("location", _baseUrl);
+				writer.WriteEndElement(); // soap:address
+
+				writer.WriteEndElement(); // wsdl:port
+			}
 		}
 
-		private void AddSchemaType(XmlDictionaryWriter writer, Type type, string name, bool isArray = false, string objectNamespace = null)
+		private void AddSchemaType(XmlDictionaryWriter writer, Type type, string name, bool isArray = false, string objectNamespace = null, bool isRequired = false)
 		{
 			var typeInfo = type.GetTypeInfo();
 			var typeName = GetTypeName(type);
@@ -981,7 +1187,12 @@ namespace SoapCore.Meta
 				type = typeInfo.GetElementType();
 			}
 
-			writer.WriteStartElement("xs:element");
+			if (writer.TryAddSchemaTypeFromXmlSchemaProviderAttribute(type, name, SoapSerializer.DataContractSerializer))
+			{
+				return;
+			}
+
+			writer.WriteStartElement("xs", "element", Namespaces.XMLNS_XSD);
 
 			if (objectNamespace == null)
 			{
@@ -998,6 +1209,12 @@ namespace SoapCore.Meta
 				}
 
 				writer.WriteAttributeString("name", name);
+
+				if (isArray)
+				{
+					writer.WriteAttributeString("minOccurs", isRequired ? "1" : "0");
+					writer.WriteAttributeString("maxOccurs", "unbounded");
+				}
 			}
 			else if (type.IsValueType)
 			{
@@ -1011,27 +1228,58 @@ namespace SoapCore.Meta
 
 					var ns = $"q{_namespaceCounter++}";
 					xsTypename = $"{ns}:{typeName}";
-					writer.WriteAttributeString($"xmlns:{ns}", SYSTEM_NS);
+					writer.WriteXmlnsAttribute($"{ns}", Namespaces.SYSTEM_NS);
 
 					_buildDateTimeOffset = true;
 				}
 				else
 				{
-					var underlyingType = Nullable.GetUnderlyingType(type);
+					Type underlyingType = Nullable.GetUnderlyingType(type);
 					if (underlyingType != null)
 					{
-						var sysType = ResolveSystemType(underlyingType);
-						xsTypename = $"{(sysType.ns == SERIALIZATION_NS ? "ser" : "xs")}:{sysType.name}";
-						writer.WriteAttributeString("nillable", "true");
+						objectNamespace = GetDataContractNamespace(underlyingType);
+						typeName = GetTypeName(underlyingType);
+
+						if (ResolveSystemType(underlyingType).name != null)
+						{
+							var sysType = ResolveSystemType(underlyingType);
+							xsTypename = $"{(sysType.ns == Namespaces.SERIALIZATION_NS ? "ser" : "xs")}:{sysType.name}";
+							writer.WriteAttributeString("nillable", "true");
+						}
+						else if (_schemaNamespace != objectNamespace)
+						{
+							var ns = $"q{_namespaceCounter++}";
+							writer.WriteXmlnsAttribute($"{ns}", GetDataContractNamespace(type));
+
+							xsTypename = $"{ns}:{typeName}";
+						}
+						else
+						{
+							xsTypename = $"tns:{typeName}";
+						}
 					}
 					else
 					{
-						var sysType = ResolveSystemType(type);
-						xsTypename = $"{(sysType.ns == SERIALIZATION_NS ? "ser" : "xs")}:{sysType.name}";
+						if (ResolveSystemType(type).name != null)
+						{
+							var sysType = ResolveSystemType(type);
+							xsTypename = $"{(sysType.ns == Namespaces.SERIALIZATION_NS ? "ser" : "xs")}:{sysType.name}";
+						}
+						else if (_schemaNamespace != objectNamespace)
+						{
+							var ns = $"q{_namespaceCounter++}";
+							writer.WriteXmlnsAttribute($"{ns}", GetDataContractNamespace(type));
+
+							xsTypename = $"{ns}:{typeName}";
+						}
+						else
+						{
+							xsTypename = $"tns:{typeName}";
+						}
 					}
 				}
 
-				writer.WriteAttributeString("minOccurs", "0");
+				writer.WriteAttributeString("minOccurs", isRequired ? "1" : "0");
 				if (isArray)
 				{
 					writer.WriteAttributeString("maxOccurs", "unbounded");
@@ -1047,7 +1295,7 @@ namespace SoapCore.Meta
 			}
 			else
 			{
-				writer.WriteAttributeString("minOccurs", "0");
+				writer.WriteAttributeString("minOccurs", isRequired ? "1" : "0");
 				if (isArray)
 				{
 					writer.WriteAttributeString("maxOccurs", "unbounded");
@@ -1066,21 +1314,24 @@ namespace SoapCore.Meta
 				}
 				else if (type.Name == "Object" || type.Name == "Object&")
 				{
-					writer.WriteAttributeString("name", "anyType");
+					if (string.IsNullOrEmpty(name))
+					{
+						name = "anyType";
+					}
+
+					writer.WriteAttributeString("name", name);
 					writer.WriteAttributeString("type", "xs:anyType");
 				}
-				else if (type == typeof(System.Xml.Linq.XElement))
+				else if (type.Name == "Uri" || type.Name == "Uri&")
 				{
+					if (string.IsNullOrEmpty(name))
+					{
+						name = "anyURI";
+					}
+
+					// TODO: should we compare namespace to `System.Uri` or ensure type assembly is mscorelib/System
 					writer.WriteAttributeString("name", name);
-					writer.WriteAttributeString("nillable", "true");
-					writer.WriteStartElement("xs:complexType");
-					writer.WriteStartElement("xs:sequence");
-					writer.WriteStartElement("xs:any");
-					writer.WriteAttributeString("minOccurs", "0");
-					writer.WriteAttributeString("processContents", "lax");
-					writer.WriteEndElement();
-					writer.WriteEndElement();
-					writer.WriteEndElement();
+					writer.WriteAttributeString("type", "xs:anyURI");
 				}
 				else if (type == typeof(DataTable))
 				{
@@ -1088,28 +1339,28 @@ namespace SoapCore.Meta
 
 					writer.WriteAttributeString("name", name);
 					writer.WriteAttributeString("nillable", "true");
-					writer.WriteStartElement("xs:complexType");
-					writer.WriteStartElement("xs:annotation");
-					writer.WriteStartElement("xs:appinfo");
+					writer.WriteStartElement("xs", "complexType", Namespaces.XMLNS_XSD);
+					writer.WriteStartElement("xs", "annotation", Namespaces.XMLNS_XSD);
+					writer.WriteStartElement("xs", "appinfo", Namespaces.XMLNS_XSD);
 					writer.WriteStartElement("ActualType");
-					writer.WriteAttributeString("xmlns", "http://schemas.microsoft.com/2003/10/Serialization/");
+					writer.WriteAttributeString("xmlns", Namespaces.SERIALIZATION_NS);
 					writer.WriteAttributeString("Name", "DataTable");
-					writer.WriteAttributeString("Namespace", "http://schemas.datacontract.org/2004/07/System.Data");
+					writer.WriteAttributeString("Namespace", Namespaces.SystemData_NS);
 					writer.WriteEndElement(); //actual type
 					writer.WriteEndElement(); // appinfo
 					writer.WriteEndElement(); //annotation
 					writer.WriteEndElement(); //complex type
 
-					writer.WriteStartElement("xs:sequence");
+					writer.WriteStartElement("xs", "sequence", Namespaces.XMLNS_XSD);
 
-					writer.WriteStartElement("xs:any");
+					writer.WriteStartElement("xs", "any", Namespaces.XMLNS_XSD);
 					writer.WriteAttributeString("minOccurs", "0");
 					writer.WriteAttributeString("maxOccurs", "unbounded");
-					writer.WriteAttributeString("namespace", "http://www.w3.org/2001/XMLSchema");
+					writer.WriteAttributeString("namespace", Namespaces.XMLNS_XSD);
 					writer.WriteAttributeString("processContents", "lax");
 					writer.WriteEndElement();
 
-					writer.WriteStartElement("xs:any");
+					writer.WriteStartElement("xs", "any", Namespaces.XMLNS_XSD);
 					writer.WriteAttributeString("minOccurs", "1");
 					writer.WriteAttributeString("namespace", "urn:schemas-microsoft-com:xml-diffgram-v1");
 					writer.WriteAttributeString("processContents", "lax");
@@ -1136,7 +1387,14 @@ namespace SoapCore.Meta
 				}
 				else if (typeof(IEnumerable).IsAssignableFrom(type))
 				{
-					var elType = type.IsArray ? type.GetElementType() : GetGenericType(type);
+					var elType = type;
+
+					var collectionDataContractAttribute = type.GetCustomAttribute<CollectionDataContractAttribute>();
+					if (collectionDataContractAttribute == null)
+					{
+						elType = elType.IsArray ? type.GetElementType() : GetGenericType(type);
+					}
+
 					var sysType = ResolveSystemType(elType);
 					if (sysType.name != null)
 					{
@@ -1147,7 +1405,7 @@ namespace SoapCore.Meta
 
 						var ns = $"q{_namespaceCounter++}";
 
-						writer.WriteAttributeString($"xmlns:{ns}", ARRAYS_NS);
+						writer.WriteXmlnsAttribute($"{ns}", Namespaces.ARRAYS_NS);
 						writer.WriteAttributeString("name", name);
 						writer.WriteAttributeString("nillable", "true");
 						writer.WriteAttributeString("type", $"{ns}:ArrayOf{sysType.name}");
@@ -1185,8 +1443,8 @@ namespace SoapCore.Meta
 		private bool TypeIsComplexForWsdl(Type type, out Type resultType)
 		{
 			var typeInfo = type.GetTypeInfo();
-			resultType = null;
 			resultType = type;
+
 			if (typeInfo.IsByRef)
 			{
 				type = typeInfo.GetElementType();
@@ -1194,11 +1452,22 @@ namespace SoapCore.Meta
 
 			if (typeof(IEnumerable).IsAssignableFrom(type))
 			{
+				var collectionDataContractAttribute = type.GetCustomAttribute<CollectionDataContractAttribute>();
+				if (collectionDataContractAttribute != null)
+				{
+					return true;
+				}
+
 				resultType = type.IsArray ? type.GetElementType() : GetGenericType(type);
 				type = resultType;
 			}
 
-			if (typeInfo.IsEnum || typeInfo.IsValueType)
+			if (type == typeof(DateTimeOffset))
+			{
+				return false;
+			}
+
+			if (typeInfo.IsEnum)
 			{
 				return false;
 			}
@@ -1250,8 +1519,8 @@ namespace SoapCore.Meta
 			if (schemaNamespace != objectNamespace)
 			{
 				var ns = $"q{_namespaceCounter++}";
+				writer.WriteXmlnsAttribute($"{ns}", GetDataContractNamespace(type));
 				writer.WriteAttributeString("type", $"{ns}:{typeName}");
-				writer.WriteAttributeString($"xmlns:{ns}", GetDataContractNamespace(type));
 			}
 			else
 			{
@@ -1263,11 +1532,11 @@ namespace SoapCore.Meta
 		{
 			if (type.IsGenericType && !type.IsArray && !typeof(IEnumerable).IsAssignableFrom(type))
 			{
-				var genericType = GetGenericType(type);
-				var genericTypeName = GetTypeName(genericType);
+				var genericTypes = GetGenericTypes(type);
+				var genericTypeNames = genericTypes.Select(a => GetTypeName(a));
 
-				var typeName = type.Name.Replace("`1", string.Empty);
-				typeName = typeName + "Of" + genericTypeName;
+				var typeName = ReplaceGenericNames(type.Name);
+				typeName = typeName + "Of" + string.Concat(genericTypeNames);
 				return typeName;
 			}
 
@@ -1276,14 +1545,37 @@ namespace SoapCore.Meta
 				return "ArrayOf" + GetTypeName(type.GetElementType());
 			}
 
-			if (typeof(IEnumerable).IsAssignableFrom(type))
+			//Special case as string is IEnumerable and we don't want to turn it into System.Object
+			if (typeof(IEnumerable).IsAssignableFrom(type) && type != typeof(string))
 			{
-				return "ArrayOf" + GetTypeName(GetGenericType(type));
+				var collectionDataContractAttribute = type.GetCustomAttribute<CollectionDataContractAttribute>();
+				if (collectionDataContractAttribute != null)
+				{
+					var typeName = collectionDataContractAttribute.IsNameSetExplicitly
+						? collectionDataContractAttribute.Name
+						: ReplaceGenericNames(type.Name);
+
+					if (type.IsGenericType)
+					{
+						var genericType = GetGenericType(type);
+
+						var (name, _) = ResolveSystemType(genericType);
+						var genericTypeName = string.IsNullOrEmpty(name) ? GetTypeName(genericType) : name;
+
+						typeName = string.Format(typeName, genericTypeName);
+					}
+
+					return typeName;
+				}
+				else
+				{
+					return "ArrayOf" + GetTypeName(GetGenericType(type));
+				}
 			}
 
 			// Make use of DataContract attribute, if set, as it may contain a Name override
 			var dataContractAttribute = type.GetCustomAttribute<DataContractAttribute>();
-			if (dataContractAttribute != null && !string.IsNullOrEmpty(dataContractAttribute.Name))
+			if (dataContractAttribute != null && dataContractAttribute.IsNameSetExplicitly)
 			{
 				return dataContractAttribute.Name;
 			}
@@ -1291,11 +1583,26 @@ namespace SoapCore.Meta
 			return type.Name;
 		}
 
-#pragma warning disable SA1009 // Closing parenthesis must be spaced correctly
-#pragma warning disable SA1008 // Opening parenthesis must be spaced correctly
+		private string ReplaceGenericNames(string name)
+		{
+			if (name.Contains("`"))
+			{
+				//Regex would be easier
+				foreach (var number in _numbers)
+				{
+					name = name.Replace("`" + number, "`" + string.Empty);
+				}
+
+				return name.Replace("`", string.Empty);
+			}
+			else
+			{
+				return name;
+			}
+		}
+
 		private (string name, string ns) ResolveSystemType(Type type)
 		{
-			type = type.IsEnum ? type.GetEnumUnderlyingType() : type;
 			if (SysTypeDic.ContainsKey(type.FullName))
 			{
 				return SysTypeDic[type.FullName];
@@ -1303,8 +1610,6 @@ namespace SoapCore.Meta
 
 			return (null, null);
 		}
-#pragma warning restore SA1008 // Opening parenthesis must be spaced correctly
-#pragma warning restore SA1009 // Closing parenthesis must be spaced correctly
 
 		private bool HasBaseType(Type type)
 		{
@@ -1313,6 +1618,22 @@ namespace SoapCore.Meta
 			var baseType = type.GetTypeInfo().BaseType;
 
 			return !isArrayType && !type.IsEnum && !type.IsPrimitive && !type.IsValueType && baseType != null && !baseType.Name.Equals("Object");
+		}
+
+		private (string soapPrefix, string ns, string qualifiedBindingName, string qualifiedPortName) GetSoapMetaParameters(SoapBindingInfo bindingInfo)
+		{
+			int soapVersion = 11;
+			if (bindingInfo.MessageVersion == MessageVersion.Soap12WSAddressingAugust2004 || bindingInfo.MessageVersion == MessageVersion.Soap12WSAddressing10)
+			{
+				soapVersion = 12;
+			}
+
+			(var soapPrefix, var ns) = soapVersion == 12 ? ("soap12", Namespaces.SOAP12_NS) : ("soap", Namespaces.SOAP11_NS);
+
+			var qualifiedBindingName = !string.IsNullOrWhiteSpace(bindingInfo.BindingName) ? bindingInfo.BindingName : BindingName;
+			var qualifiedPortName = !string.IsNullOrWhiteSpace(bindingInfo.PortName) ? bindingInfo.PortName : PortName;
+
+			return (soapPrefix, ns, qualifiedBindingName, qualifiedPortName);
 		}
 	}
 }
