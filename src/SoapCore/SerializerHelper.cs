@@ -1,10 +1,12 @@
 using System;
 using System.CodeDom;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.Serialization;
+using System.Xml;
 using System.Xml.Serialization;
 using Microsoft.CSharp;
 
@@ -41,7 +43,7 @@ namespace SoapCore
 					switch (_serializer)
 					{
 						case SoapSerializer.XmlSerializer:
-							if (!parameterType.IsArray)
+							if (!parameterType.IsArray || parameterType.GetElementType()?.IsArray == true)
 							{
 								// case [XmlElement("parameter")] int parameter
 								// case [XmlArray("parameter")] int[] parameter
@@ -88,6 +90,14 @@ namespace SoapCore
 			{
 				xmlReader.Read();
 				return new MemoryStream(xmlReader.ReadContentAsBase64(), false);
+			}
+
+			if (elementType == typeof(XmlElement) || elementType == typeof(XmlNode))
+			{
+				var xmlDoc = new XmlDocument();
+				xmlDoc.LoadXml(xmlReader.ReadInnerXml());
+				var xmlNode = xmlDoc.FirstChild;
+				return xmlNode;
 			}
 
 			return serializer.Deserialize(xmlReader);

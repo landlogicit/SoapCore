@@ -11,6 +11,8 @@ using System.Threading.Tasks;
 using System.Xml;
 using System.Xml.Schema;
 using System.Xml.Serialization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Infrastructure;
 using SoapCore.ServiceModel;
 
 namespace SoapCore.Meta
@@ -33,6 +35,7 @@ namespace SoapCore.Meta
 		private readonly Dictionary<string, Dictionary<string, string>> _requestedDynamicTypes;
 
 		private bool _buildDateTimeOffset;
+		private bool _buildMicrosoftGuid = false;
 
 		[Obsolete]
 		public MetaBodyWriter(ServiceDescription service, string baseUrl, Binding binding, XmlNamespaceManager xmlNamespaceManager = null)
@@ -41,11 +44,13 @@ namespace SoapCore.Meta
 				baseUrl,
 				xmlNamespaceManager ?? new XmlNamespaceManager(new NameTable()),
 				binding?.Name ?? "BasicHttpBinding_" + service.GeneralContract.Name,
-				new[] { new SoapBindingInfo(binding.MessageVersion ?? MessageVersion.None, null, null) })
+				new[] { new SoapBindingInfo(binding.MessageVersion ?? MessageVersion.None, null, null) },
+				false)
+
 		{
 		}
 
-		public MetaBodyWriter(ServiceDescription service, string baseUrl, XmlNamespaceManager xmlNamespaceManager, string bindingName, SoapBindingInfo[] soapBindings) : base(isBuffered: true)
+		public MetaBodyWriter(ServiceDescription service, string baseUrl, XmlNamespaceManager xmlNamespaceManager, string bindingName, SoapBindingInfo[] soapBindings, bool buildMicrosoftGuid) : base(isBuffered: true)
 		{
 			_service = service;
 			_baseUrl = baseUrl;
@@ -62,6 +67,7 @@ namespace SoapCore.Meta
 			BindingName = bindingName;
 			PortName = bindingName;
 			SoapBindings = soapBindings;
+			_buildMicrosoftGuid = buildMicrosoftGuid;
 		}
 
 		private SoapBindingInfo[] SoapBindings { get; }
@@ -456,10 +462,29 @@ namespace SoapCore.Meta
 					writer.WriteStartElement("restriction", Namespaces.XMLNS_XSD);
 					writer.WriteAttributeString("base", $"{_xmlNamespaceManager.LookupPrefix(Namespaces.XMLNS_XSD)}:string");
 
-					foreach (var value in Enum.GetValues(toBuild))
+					var membersWithCustomNames = from n in Enum.GetNames(toBuild)
+												 join m in toBuild.GetMembers() on n equals m.Name
+												 let ca = m.CustomAttributes.FirstOrDefault(ca => ca.AttributeType == typeof(XmlEnumAttribute))
+												 select new
+												 {
+													 m.Name,
+													 CustomName =
+													 (ca?
+																	.ConstructorArguments?
+																	.FirstOrDefault()
+																	.Value
+																??
+																ca?
+																	.NamedArguments?
+																	.FirstOrDefault(a => a.MemberName == "Name")
+																	.TypedValue
+																	.Value)?
+																.ToString()
+												 };
+					foreach (var member in membersWithCustomNames)
 					{
 						writer.WriteStartElement("enumeration", Namespaces.XMLNS_XSD);
-						writer.WriteAttributeString("value", value.ToString());
+						writer.WriteAttributeString("value", member.CustomName ?? member.Name);
 						writer.WriteEndElement(); // enumeration
 					}
 
@@ -537,6 +562,29 @@ namespace SoapCore.Meta
 				writer.WriteAttributeString("nillable", "true");
 				writer.WriteAttributeString("type", "tns:DateTimeOffset");
 				writer.WriteEndElement();
+
+				writer.WriteEndElement(); // schema
+			}
+
+			if(_buildMicrosoftGuid)
+			{
+				writer.WriteStartElement("schema", Namespaces.XMLNS_XSD);
+				writer.WriteAttributeString("elementFormDefault", "qualified");
+				writer.WriteAttributeString("targetNamespace", Namespaces.MICROSOFT_TYPES);
+
+				writer.WriteStartElement("simpleType", Namespaces.XMLNS_XSD);
+				writer.WriteAttributeString("name", "guid");
+
+				writer.WriteStartElement("restriction", Namespaces.XMLNS_XSD);
+				writer.WriteAttributeString("base", $"{_xmlNamespaceManager.LookupPrefix(Namespaces.XMLNS_XSD)}:string");
+
+				writer.WriteStartElement("pattern", Namespaces.XMLNS_XSD);
+				writer.WriteAttributeString("value", "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
+				writer.WriteEndElement(); // pattern
+
+				writer.WriteEndElement(); // restriction
+
+				writer.WriteEndElement(); // simpleType
 
 				writer.WriteEndElement(); // schema
 			}
@@ -846,9 +894,11 @@ namespace SoapCore.Meta
 
 			var elementItem = member.GetCustomAttribute<XmlElementAttribute>();
 			bool isUnqualified = elementItem?.Form == XmlSchemaForm.Unqualified;
+			string elementNameFromAttribute = null;
 			if (elementItem != null && !string.IsNullOrWhiteSpace(elementItem.ElementName))
 			{
-				toBuild.ChildElementName = elementItem.ElementName;
+				elementNameFromAttribute = elementItem.ElementName;
+				toBuild.ChildElementName = elementNameFromAttribute;
 				createListWithoutProxyType = toBuild.Type.IsEnumerableType();
 			}
 
@@ -889,7 +939,8 @@ namespace SoapCore.Meta
 						defaultValue = defaultAttributeValue.ToString();
 					}
 				}
-				AddSchemaType(writer, toBuild, parentTypeToBuild.ChildElementName ?? member.Name, isArray: createListWithoutProxyType, isListWithoutWrapper: createListWithoutProxyType, isUnqualified: isUnqualified, defaultValue: defaultValue);
+
+				AddSchemaType(writer, toBuild, elementNameFromAttribute ?? member.Name ?? parentTypeToBuild.ChildElementName, isArray: createListWithoutProxyType, isListWithoutWrapper: createListWithoutProxyType, isUnqualified: isUnqualified, defaultValue: defaultValue);
 			}
 		}
 
@@ -912,6 +963,22 @@ namespace SoapCore.Meta
 		private void AddSchemaType(XmlDictionaryWriter writer, TypeToBuild toBuild, string name, bool isArray = false, string @namespace = null, bool isAttribute = false, bool isListWithoutWrapper = false, bool isUnqualified = false, string defaultValue = null)
 		{
 			var type = toBuild.Type;
+
+			if (typeof(IActionResult).IsAssignableFrom(type) || typeof(IConvertToActionResult).IsAssignableFrom(type))
+			{
+				var genericArgs = type.GetGenericArguments();
+
+				if (genericArgs.Length > 0)
+				{
+					type = genericArgs[0];
+				}
+				else
+				{
+					type = typeof(object);
+				}
+
+				toBuild = new TypeToBuild(type);
+			}
 
 			if (type.IsByRef)
 			{
@@ -949,7 +1016,11 @@ namespace SoapCore.Meta
 			{
 				XmlQualifiedName xsTypename;
 				string ns = null;
-				if (typeof(DateTimeOffset).IsAssignableFrom(type))
+				if (type == typeof(Guid) && _buildMicrosoftGuid)
+				{
+					xsTypename = new XmlQualifiedName("guid", Namespaces.MICROSOFT_TYPES);
+				}
+				else if (typeof(DateTimeOffset).IsAssignableFrom(type))
 				{
 					if (string.IsNullOrEmpty(name))
 					{
@@ -989,7 +1060,7 @@ namespace SoapCore.Meta
 				{
 					// skip occurence
 				}
-				else if (isArray)
+				else if (isArray && type.Name != "String" && type.Name != "Byte[]")
 				{
 					writer.WriteAttributeString("minOccurs", "0");
 					writer.WriteAttributeString("maxOccurs", "unbounded");

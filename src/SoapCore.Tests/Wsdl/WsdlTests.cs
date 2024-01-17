@@ -445,6 +445,39 @@ namespace SoapCore.Tests.Wsdl
 			Assert.IsNotNull(myStringElement);
 		}
 
+		[TestMethod]
+		public void CheckIActionResultInterfaceDataContract()
+		{
+			StartService(typeof(ActionResultContractService));
+			var wsdl = GetWsdl();
+			StopServer();
+
+			var root = XElement.Parse(wsdl);
+
+			var iactionReultResponse = GetElements(root, _xmlSchema + "element").SingleOrDefault(a => a.Attribute("name")?.Value.Equals("IActionResultTestResult") == true);
+			Assert.IsNotNull(iactionReultResponse);
+			Assert.AreEqual("xs:anyType", iactionReultResponse.Attribute("type").Value);
+
+			var actionReultResponse = GetElements(root, _xmlSchema + "element").SingleOrDefault(a => a.Attribute("name")?.Value.Equals("ActionResultTestResult") == true);
+			Assert.IsNotNull(actionReultResponse);
+			Assert.AreEqual("xs:anyType", actionReultResponse.Attribute("type").Value);
+
+			var genericActionReultResponse = GetElements(root, _xmlSchema + "element").SingleOrDefault(a => a.Attribute("name")?.Value.Equals("GenericActionResultTestResult") == true);
+			Assert.IsNotNull(genericActionReultResponse);
+			Assert.AreEqual("xs:string", genericActionReultResponse.Attribute("type").Value);
+
+			var complexGenericActionReultResponse = GetElements(root, _xmlSchema + "element").SingleOrDefault(a => a.Attribute("name")?.Value.Equals("ComplexGenericActionResultTestResult") == true);
+			Assert.IsNotNull(complexGenericActionReultResponse);
+			Assert.AreEqual("http://schemas.datacontract.org/2004/07/SoapCore.Tests.Model", complexGenericActionReultResponse.Attribute(XNamespace.Xmlns + "q1").Value);
+			Assert.AreEqual("q1:ComplexModelInput", complexGenericActionReultResponse.Attribute("type").Value);
+
+			var complexTypeList = GetElements(root, _xmlSchema + "complexType").SingleOrDefault(a => a.Attribute("name")?.Value.Equals("ComplexModelInput") == true);
+			Assert.IsNotNull(complexTypeList);
+
+			var myStringElement = GetElements(complexTypeList, _xmlSchema + "element").SingleOrDefault(a => a.Attribute("name")?.Value.Equals("StringProperty") == true);
+			Assert.IsNotNull(myStringElement);
+		}
+
 		[DataTestMethod]
 		[DataRow(SoapSerializer.XmlSerializer)]
 		[DataRow(SoapSerializer.DataContractSerializer)]
@@ -517,6 +550,113 @@ namespace SoapCore.Tests.Wsdl
 		}
 
 		[DataTestMethod]
+		public async Task CheckComplexComplexTypeWithCustomXmlNamesWsdl()
+		{
+			var wsdl = await GetWsdlFromMetaBodyWriter<ComplexComplexTypeWithCustomXmlNamesService>(SoapSerializer.XmlSerializer);
+			Trace.TraceInformation(wsdl);
+			Assert.IsNotNull(wsdl);
+
+			var root = XElement.Parse(wsdl);
+
+			//loading definition of ComplexComplexType
+			var testComplexComplexType = GetElements(root, _xmlSchema + "complexType").SingleOrDefault(a => a.Attribute("name")?.Value == "ComplexComplexType");
+			Assert.IsNotNull(testComplexComplexType);
+
+			//checking sequence to be there
+			var testSequenceOfComplexComplexType = GetElements(testComplexComplexType, _xmlSchema + "sequence").SingleOrDefault();
+			Assert.IsNotNull(testSequenceOfComplexComplexType);
+
+			//checking custom name specified per XmlElementAttribute is used
+			var testElementOfComplexComplexType = GetElements(testSequenceOfComplexComplexType, _xmlSchema + "element").SingleOrDefault(a => a.Attribute("name").Value == "complex");
+			Assert.IsNotNull(testElementOfComplexComplexType);
+
+			//loading definition of ComplexType
+			var testComplexType = GetElements(root, _xmlSchema + "complexType").SingleOrDefault(a => a.Attribute("name")?.Value == "ComplexType");
+			Assert.IsNotNull(testComplexType);
+
+			//checking sequence to be there
+			var testSequenceOfComplexType = GetElements(testComplexType, _xmlSchema + "sequence").SingleOrDefault();
+			Assert.IsNotNull(testSequenceOfComplexType);
+
+			//checking custom names specified per XmlElementAttribute are used
+			var testElementWithCustomName = GetElements(testSequenceOfComplexType, _xmlSchema + "element").SingleOrDefault(a => a.Attribute("name").Value == "stringprop");
+			Assert.IsNotNull(testElementWithCustomName);
+
+			testElementWithCustomName = GetElements(testSequenceOfComplexType, _xmlSchema + "element").SingleOrDefault(a => a.Attribute("name").Value == "mybytes");
+			Assert.IsNotNull(testElementWithCustomName);
+
+			//checking both properties without custom names to use the same names as properties in the ComplexType class
+			var testElementWithDefaultName = GetElements(testSequenceOfComplexType, _xmlSchema + "element").SingleOrDefault(a => a.Attribute("name").Value == "IntProperty");
+			Assert.IsNotNull(testElementWithDefaultName);
+
+			testElementWithDefaultName = GetElements(testSequenceOfComplexType, _xmlSchema + "element").SingleOrDefault(a => a.Attribute("name").Value == "MyGuid");
+			Assert.IsNotNull(testElementWithDefaultName);
+		}
+
+		[DataTestMethod]
+		public async Task CheckEnumWithCustomNamesXmlSerializedWsdl()
+		{
+			var wsdl = await GetWsdlFromMetaBodyWriter<EnumWithCustomNamesService>(SoapSerializer.XmlSerializer);
+			Trace.TraceInformation(wsdl);
+			Assert.IsNotNull(wsdl);
+
+			var root = XElement.Parse(wsdl);
+
+			//loading definition of EnumWithCustomNames
+			var enumWithCustomNamesElement = GetElements(root, _xmlSchema + "simpleType").FirstOrDefault(a => a.Attribute("name")?.Value.Equals("EnumWithCustomNames") == true);
+			Assert.IsNotNull(enumWithCustomNamesElement);
+
+			//checking restriction to be there
+			var testRestrictionOfEnumWithCustomNames = GetElements(enumWithCustomNamesElement, _xmlSchema + "restriction").SingleOrDefault();
+			Assert.IsNotNull(testRestrictionOfEnumWithCustomNames);
+
+			//checking enumeration elements to be there
+			var testEnumerationElements = GetElements(testRestrictionOfEnumWithCustomNames, _xmlSchema + "enumeration").ToList();
+			Assert.IsNotNull(testEnumerationElements);
+			Assert.AreEqual(3, testEnumerationElements.Count);
+
+			//checking custom names specified per XmlEnumAttribute are used
+			Assert.IsNotNull(testEnumerationElements.SingleOrDefault(e => e.FirstAttribute?.Value == "F"));
+			Assert.IsNotNull(testEnumerationElements.SingleOrDefault(e => e.FirstAttribute?.Value == "S"));
+
+			//checking default name specified by enum member
+			Assert.IsNotNull(testEnumerationElements.SingleOrDefault(e => e.FirstAttribute?.Value == "ThirdEnumMember"));
+		}
+
+		[DataTestMethod]
+		[DataRow(SoapSerializer.XmlSerializer)]
+		public async Task CheckOccuranceOfStringType(SoapSerializer soapSerializer)
+		{
+			//StartService(typeof(StringListService));
+			//var wsdl = GetWsdl();
+			//StopServer();
+			var wsdl = await GetWsdlFromMetaBodyWriter<ComplexTypeAndOutParameterService>(soapSerializer, useMicrosoftGuid: true);
+			Trace.TraceInformation(wsdl);
+			Assert.IsNotNull(wsdl);
+
+			var root = XElement.Parse(wsdl);
+
+			// Check that method response element exists for xmlserializer meta
+			var testComplexType = GetElements(root, _xmlSchema + "complexType").SingleOrDefault(a => a.Attribute("name")?.Value == "ComplexType");
+			Assert.IsNotNull(testComplexType);
+
+			var testSequence = GetElements(testComplexType, _xmlSchema + "sequence").SingleOrDefault();
+			Assert.IsNotNull(testSequence);
+
+			var testElements = GetElements(testSequence, _xmlSchema + "element").ToArray();
+			var stringprop = testElements.SingleOrDefault(a => a.Attribute("name").Value == "stringprop");
+			var byteprop = testElements.SingleOrDefault(a => a.Attribute("name").Value == "mybytes");
+
+			Assert.IsNotNull(stringprop);
+			Assert.IsTrue(stringprop.Attribute("minOccurs").Value == "0");
+			Assert.IsTrue(stringprop.Attribute("maxOccurs").Value == "1");
+
+			Assert.IsNotNull(byteprop);
+			Assert.IsTrue(byteprop.Attribute("minOccurs").Value == "0");
+			Assert.IsTrue(byteprop.Attribute("maxOccurs").Value == "1");
+		}
+
+		[DataTestMethod]
 		[DataRow(SoapSerializer.XmlSerializer)]
 		[DataRow(SoapSerializer.DataContractSerializer)]
 		public async Task CheckUnqualifiedMembersService(SoapSerializer soapSerializer)
@@ -525,7 +665,7 @@ namespace SoapCore.Tests.Wsdl
 			Trace.TraceInformation(wsdl);
 
 			var root = XElement.Parse(wsdl);
-			var nm = Namespaces.CreateDefaultXmlNamespaceManager();
+			var nm = Namespaces.CreateDefaultXmlNamespaceManager(false);
 
 			bool allNeededAreUnqualified = root.XPathSelectElements($"//xsd:complexType[@name='{nameof(TypeWithUnqualifiedMembers)}' or @name='{nameof(UnqType2)}']/xsd:sequence/xsd:element[contains(@name, 'Unqualified')]", nm)
 				.All(x => x.Attribute("form")?.Value.Equals("unqualified") == true);
@@ -541,7 +681,7 @@ namespace SoapCore.Tests.Wsdl
 		[DataRow(SoapSerializer.DataContractSerializer)]
 		public async Task CheckDateTimeOffsetServiceWsdl(SoapSerializer soapSerializer)
 		{
-			var nm = Namespaces.CreateDefaultXmlNamespaceManager();
+			var nm = Namespaces.CreateDefaultXmlNamespaceManager(false);
 			string systemNs = "http://schemas.datacontract.org/2004/07/System";
 
 			var wsdl = await GetWsdlFromMetaBodyWriter<DateTimeOffsetService>(soapSerializer);
@@ -567,7 +707,7 @@ namespace SoapCore.Tests.Wsdl
 			Assert.IsNotNull(wsdl);
 
 			var root = XElement.Parse(wsdl);
-			var nm = Namespaces.CreateDefaultXmlNamespaceManager();
+			var nm = Namespaces.CreateDefaultXmlNamespaceManager(false);
 
 			var responseDateElem = root.XPathSelectElement("//xsd:element[@name='GetDateResponse']/xsd:complexType/xsd:sequence/xsd:element[@name='GetDateResult' and contains(@type, ':date')]", nm);
 			Assert.IsNotNull(responseDateElem);
@@ -591,7 +731,7 @@ namespace SoapCore.Tests.Wsdl
 			Assert.IsNotNull(wsdl);
 
 			var root = XElement.Parse(wsdl);
-			var nm = Namespaces.CreateDefaultXmlNamespaceManager();
+			var nm = Namespaces.CreateDefaultXmlNamespaceManager(false);
 
 			var nullableArray = root.XPathSelectElement("//xsd:complexType[@name='ArrayRequest']/xsd:sequence/xsd:element[@name='LongNullableArray' and @type='tns:ArrayOfNullableLong' and @nillable='true']", nm);
 			Assert.IsNotNull(nullableArray);
@@ -666,7 +806,7 @@ namespace SoapCore.Tests.Wsdl
 			Assert.IsFalse(wsdl.Contains("name=\"\""));
 
 			var root = XElement.Parse(wsdl);
-			var nm = Namespaces.CreateDefaultXmlNamespaceManager();
+			var nm = Namespaces.CreateDefaultXmlNamespaceManager(false);
 
 			var requestTypeElement = root.XPathSelectElement("//xsd:element[@name='RequestRoot']", nm);
 			Assert.IsNotNull(requestTypeElement);
@@ -677,7 +817,7 @@ namespace SoapCore.Tests.Wsdl
 			var referenceToExistingDynamicType = root.XPathSelectElement("//xsd:complexType[@name='TestResponseType']/xsd:sequence/xsd:element[@name='DataList3' and @type='tns:ArrayOfTestDataTypeData']", nm);
 			Assert.IsNotNull(referenceToExistingDynamicType);
 
-			var selfContainedType = root.XPathSelectElement("//xsd:complexType[@name='TestResponseType']/xsd:sequence/xsd:element[@name='Data' and @minOccurs='0'and @maxOccurs='unbounded' and not(@type)]", nm);
+			var selfContainedType = root.XPathSelectElement("//xsd:complexType[@name='TestResponseType']/xsd:sequence/xsd:element[@name='Data3' and @minOccurs='0'and @maxOccurs='unbounded' and not(@type)]", nm);
 			Assert.IsNotNull(selfContainedType);
 
 			var dynamicTypeElement = root.XPathSelectElement("//xsd:complexType[@name='ArrayOfTestDataTypeData']/xsd:sequence/xsd:element[@name='Data']", nm);
@@ -712,7 +852,7 @@ namespace SoapCore.Tests.Wsdl
 			Assert.IsFalse(wsdl.Contains("name=\"\""));
 
 			var root = XElement.Parse(wsdl);
-			var nm = Namespaces.CreateDefaultXmlNamespaceManager();
+			var nm = Namespaces.CreateDefaultXmlNamespaceManager(false);
 
 			var requestTypeElement = root.XPathSelectElement("//xsd:element[@name='GetResponseResponse']", nm);
 			Assert.IsNotNull(requestTypeElement);
@@ -743,7 +883,7 @@ namespace SoapCore.Tests.Wsdl
 			Assert.IsFalse(wsdl.Contains("name=\"\""));
 
 			var root = XElement.Parse(wsdl);
-			var nm = Namespaces.CreateDefaultXmlNamespaceManager();
+			var nm = Namespaces.CreateDefaultXmlNamespaceManager(false);
 
 			var stringPropertyElement = root.XPathSelectElement("//xsd:element[@name='ModifiedStringProperty']", nm);
 			Assert.IsNotNull(stringPropertyElement);
@@ -759,7 +899,7 @@ namespace SoapCore.Tests.Wsdl
 			Assert.IsFalse(wsdl.Contains("name=\"\""));
 
 			var root = XElement.Parse(wsdl);
-			var nm = Namespaces.CreateDefaultXmlNamespaceManager();
+			var nm = Namespaces.CreateDefaultXmlNamespaceManager(false);
 
 			var booleanWithNoDefaultPropertyElement = root.XPathSelectElement("//xsd:element[@name='BooleanWithNoDefaultProperty' and @minOccurs='1' and @maxOccurs='1' and not(@default)]", nm);
 			Assert.IsNotNull(booleanWithNoDefaultPropertyElement);
@@ -799,7 +939,7 @@ namespace SoapCore.Tests.Wsdl
 			Assert.IsFalse(wsdl.Contains("name=\"\""));
 
 			var root = XElement.Parse(wsdl);
-			var nm = Namespaces.CreateDefaultXmlNamespaceManager();
+			var nm = Namespaces.CreateDefaultXmlNamespaceManager(false);
 
 			var schemaElement = root.XPathSelectElement("//xsd:schema[@targetNamespace='http://schemas.datacontract.org/2004/07/SoapCore.Tests.Model']", nm);
 			Assert.IsNotNull(schemaElement);
@@ -847,15 +987,15 @@ namespace SoapCore.Tests.Wsdl
 			}
 		}
 
-		private async Task<string> GetWsdlFromMetaBodyWriter<T>(SoapSerializer serializer, string bindingName = null, string portName = null)
+		private async Task<string> GetWsdlFromMetaBodyWriter<T>(SoapSerializer serializer, string bindingName = null, string portName = null, bool useMicrosoftGuid = false)
 		{
 			var service = new ServiceDescription(typeof(T));
 			var baseUrl = "http://tempuri.org/";
-			var xmlNamespaceManager = Namespaces.CreateDefaultXmlNamespaceManager();
+			var xmlNamespaceManager = Namespaces.CreateDefaultXmlNamespaceManager(useMicrosoftGuid);
 			var defaultBindingName = !string.IsNullOrWhiteSpace(bindingName) ? bindingName : "BasicHttpBinding";
 			var bodyWriter = serializer == SoapSerializer.DataContractSerializer
 				? new MetaWCFBodyWriter(service, baseUrl, defaultBindingName, false, new[] { new SoapBindingInfo(MessageVersion.None, bindingName, portName) }) as BodyWriter
-				: new MetaBodyWriter(service, baseUrl, xmlNamespaceManager, defaultBindingName, new[] { new SoapBindingInfo(MessageVersion.None, bindingName, portName) }) as BodyWriter;
+				: new MetaBodyWriter(service, baseUrl, xmlNamespaceManager, defaultBindingName, new[] { new SoapBindingInfo(MessageVersion.None, bindingName, portName) }, useMicrosoftGuid) as BodyWriter;
 			var encoder = new SoapMessageEncoder(MessageVersion.Soap12WSAddressingAugust2004, Encoding.UTF8, false, XmlDictionaryReaderQuotas.Max, false, true, false, null, bindingName, portName);
 			var responseMessage = Message.CreateMessage(encoder.MessageVersion, null, bodyWriter);
 			responseMessage = new MetaMessage(responseMessage, service, xmlNamespaceManager, defaultBindingName, false);
