@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.ServiceModel.Channels;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Xml;
@@ -26,8 +27,41 @@ namespace SoapCore.Tests.Wsdl
 	public class WsdlTests
 	{
 		private readonly XNamespace _xmlSchema = "http://www.w3.org/2001/XMLSchema";
+		private readonly XNamespace _wsdlSchema = "http://schemas.xmlsoap.org/wsdl/";
 
 		private IWebHost _host;
+
+		[DataTestMethod]
+		[DataRow(SoapSerializer.XmlSerializer)]
+		[DataRow(SoapSerializer.DataContractSerializer)]
+		public async Task CheckBindingAndPortName(SoapSerializer soapSerializer)
+		{
+			var wsdl = await GetWsdlFromMetaBodyWriter<TaskNoReturnService>(soapSerializer, "BindingName", "PortName");
+			var root = XElement.Parse(wsdl);
+
+			// We should have in the wsdl the definition of a complex type representing the nullable enum
+			var bindingElements = GetElements(root, _wsdlSchema + "binding").Where(a => a.Attribute("name")?.Value.Equals("BindingName") == true).ToArray();
+			bindingElements.ShouldNotBeEmpty();
+
+			var portElements = GetElements(root, _wsdlSchema + "port").Where(a => a.Attribute("name")?.Value.Equals("PortName") == true).ToArray();
+			portElements.ShouldNotBeEmpty();
+		}
+
+		[DataTestMethod]
+		[DataRow(SoapSerializer.XmlSerializer, "_soap")]
+		[DataRow(SoapSerializer.DataContractSerializer, "")]
+		public async Task CheckDefaultBindingAndPortName(SoapSerializer soapSerializer, string bindingSuffix)
+		{
+			var wsdl = await GetWsdlFromMetaBodyWriter<TaskNoReturnService>(soapSerializer);
+			var root = XElement.Parse(wsdl);
+
+			// We should have in the wsdl the definition of a complex type representing the nullable enum
+			var bindingElements = GetElements(root, _wsdlSchema + "binding").Where(a => a.Attribute("name")?.Value.Equals("BasicHttpBinding" + bindingSuffix) == true).ToArray();
+			bindingElements.ShouldNotBeEmpty();
+
+			var portElements = GetElements(root, _wsdlSchema + "port").Where(a => a.Attribute("name")?.Value.Equals("BasicHttpBinding" + bindingSuffix) == true).ToArray();
+			portElements.ShouldNotBeEmpty();
+		}
 
 		[TestMethod]
 		public void CheckTaskReturnMethod()
@@ -147,6 +181,43 @@ namespace SoapCore.Tests.Wsdl
 		}
 
 		[TestMethod]
+		public void CheckEmptyMembersServiceASMX()
+		{
+			//This did not work without fixing the MetaBodyWriter
+			StartService(typeof(OperationContractEmptyMembersService));
+			var wsdl = GetWsdlFromAsmx();
+			StopServer();
+
+			var root = XElement.Parse(wsdl);
+			Assert.IsNotNull(root);
+		}
+
+		[TestMethod]
+		public void CheckEmptyMembersService()
+		{
+			StartService(typeof(OperationContractEmptyMembersService));
+			var wsdl = GetWsdl();
+			StopServer();
+
+			var root = XElement.Parse(wsdl);
+			Assert.IsNotNull(root);
+		}
+
+		[TestMethod]
+		public void CheckDataContractWithNonDataMembersService()
+		{
+			StartService(typeof(DataContractWithNonDataMembersService));
+			var wsdl = GetWsdl();
+			StopServer();
+
+			var root = XElement.Parse(wsdl);
+			bool nonDataMembersPresent = GetElements(root, _xmlSchema + "element")
+				.Where(a => a.Attribute("name")?.Value.Contains("NonSerializable") == true)
+				.Any();
+			Assert.IsFalse(nonDataMembersPresent);
+		}
+
+		[TestMethod]
 		public void CheckStructsInList()
 		{
 			StartService(typeof(StructService));
@@ -165,6 +236,17 @@ namespace SoapCore.Tests.Wsdl
 			Assert.IsNotNull(isValueTypeElement);
 			Assert.AreEqual("true", isValueTypeElement.Value);
 			Assert.IsNotNull(annotationNode);
+		}
+
+		[TestMethod]
+		public void CheckEmptyNamesapce()
+		{
+			StartService(typeof(EmptyNamespaceService));
+			var wsdl = GetWsdl();
+			StopServer();
+
+			var root = XElement.Parse(wsdl);
+			Assert.IsNotNull(root);
 		}
 
 		[TestMethod]
@@ -363,13 +445,15 @@ namespace SoapCore.Tests.Wsdl
 			Assert.IsNotNull(myStringElement);
 		}
 
-		[TestMethod]
-		public async Task CheckStringArrayNameWsdl()
+		[DataTestMethod]
+		[DataRow(SoapSerializer.XmlSerializer)]
+		[DataRow(SoapSerializer.DataContractSerializer)]
+		public async Task CheckStringArrayNameWsdl(SoapSerializer soapSerializer)
 		{
 			//StartService(typeof(StringListService));
 			//var wsdl = GetWsdl();
 			//StopServer();
-			var wsdl = await GetWsdlFromMetaBodyWriter<StringListService>();
+			var wsdl = await GetWsdlFromMetaBodyWriter<StringListService>(soapSerializer);
 			Trace.TraceInformation(wsdl);
 			Assert.IsNotNull(wsdl);
 
@@ -399,34 +483,183 @@ namespace SoapCore.Tests.Wsdl
 			Assert.IsTrue(matched);
 		}
 
-		[TestMethod]
-		public async Task CheckDateTimeOffsetServiceWsdl()
+		[DataTestMethod]
+		[DataRow(SoapSerializer.XmlSerializer)]
+		[DataRow(SoapSerializer.DataContractSerializer)]
+		public async Task CheckComplexTypeAndOutParameterWsdl(SoapSerializer soapSerializer)
 		{
-			var wsdl = await GetWsdlFromMetaBodyWriter<DateTimeOffsetService>();
+			//StartService(typeof(StringListService));
+			//var wsdl = GetWsdl();
+			//StopServer();
+			var wsdl = await GetWsdlFromMetaBodyWriter<ComplexTypeAndOutParameterService>(soapSerializer);
+			Trace.TraceInformation(wsdl);
+			Assert.IsNotNull(wsdl);
+
+			var root = XElement.Parse(wsdl);
+
+			// Check that method response element exists for xmlserializer meta
+			var testReponseElement = GetElements(root, _xmlSchema + "element").SingleOrDefault(a => a.Attribute("name").Value == "MethodResponse");
+			Assert.IsNotNull(testReponseElement);
+
+			var testComplexType = GetElements(testReponseElement, _xmlSchema + "complexType").SingleOrDefault();
+			Assert.IsNotNull(testComplexType);
+
+			var testSequence = GetElements(testComplexType, _xmlSchema + "sequence").SingleOrDefault();
+			Assert.IsNotNull(testSequence);
+
+			var testElements = GetElements(testSequence, _xmlSchema + "element").ToArray();
+			Assert.AreEqual(2, testElements.Length);
+
+			var testElementMethodResult = testElements.SingleOrDefault(a => a.Attribute("name").Value == "MethodResult");
+			var testElementMessage = testElements.SingleOrDefault(a => a.Attribute("name").Value == "message");
+			Assert.IsNotNull(testElementMethodResult);
+			Assert.IsNotNull(testElementMessage);
+		}
+
+		[DataTestMethod]
+		[DataRow(SoapSerializer.XmlSerializer)]
+		[DataRow(SoapSerializer.DataContractSerializer)]
+		public async Task CheckUnqualifiedMembersService(SoapSerializer soapSerializer)
+		{
+			var wsdl = await GetWsdlFromMetaBodyWriter<TaskNoReturnService>(soapSerializer, "BindingName", "PortName");
+			Trace.TraceInformation(wsdl);
+
+			var root = XElement.Parse(wsdl);
+			var nm = Namespaces.CreateDefaultXmlNamespaceManager();
+
+			bool allNeededAreUnqualified = root.XPathSelectElements($"//xsd:complexType[@name='{nameof(TypeWithUnqualifiedMembers)}' or @name='{nameof(UnqType2)}']/xsd:sequence/xsd:element[contains(@name, 'Unqualified')]", nm)
+				.All(x => x.Attribute("form")?.Value.Equals("unqualified") == true);
+			Assert.IsTrue(allNeededAreUnqualified);
+
+			bool allNeededAreQualified = root.XPathSelectElements($"//xsd:complexType[@name='{nameof(TypeWithUnqualifiedMembers)}' or @name='{nameof(UnqType2)}']/xsd:sequence/xsd:element[contains(@name, 'Qualified')]", nm)
+				.All(x => x.Attribute("form")?.Value.Equals("unqualified") != true);
+			Assert.IsTrue(allNeededAreQualified);
+		}
+
+		[DataTestMethod]
+		[DataRow(SoapSerializer.XmlSerializer)]
+		[DataRow(SoapSerializer.DataContractSerializer)]
+		public async Task CheckDateTimeOffsetServiceWsdl(SoapSerializer soapSerializer)
+		{
+			var nm = Namespaces.CreateDefaultXmlNamespaceManager();
+			string systemNs = "http://schemas.datacontract.org/2004/07/System";
+
+			var wsdl = await GetWsdlFromMetaBodyWriter<DateTimeOffsetService>(soapSerializer);
+			var root = XElement.Parse(wsdl);
+			var responseDateElem = root.XPathSelectElement($"//xsd:element[@name='MethodResponse']/xsd:complexType/xsd:sequence/xsd:element[@name='MethodResult']", nm);
+			Assert.IsTrue(responseDateElem.ToString().Contains(systemNs));
+
+			var wsdlWCF = await GetWsdlFromMetaBodyWriter<DateTimeOffsetService>(SoapSerializer.DataContractSerializer);
+			var rootWCF = XElement.Parse(wsdlWCF);
+			var responseDateElemWCF = rootWCF.XPathSelectElement($"//xsd:element[@name='MethodResponse']/xsd:complexType/xsd:sequence/xsd:element[@name='MethodResult']", nm);
+			Assert.IsTrue(responseDateElemWCF.ToString().Contains(systemNs));
+			var dayOfYearElem = GetElements(rootWCF, _xmlSchema + "element").SingleOrDefault(a => a.Attribute("name")?.Value.Equals("DayOfYear") == true);
+			Assert.IsNull(dayOfYearElem);
+		}
+
+		[DataTestMethod]
+		[DataRow(SoapSerializer.XmlSerializer)]
+		[DataRow(SoapSerializer.DataContractSerializer)]
+		public async Task CheckXmlSchemaProviderTypeServiceWsdl(SoapSerializer soapSerializer)
+		{
+			var wsdl = await GetWsdlFromMetaBodyWriter<XmlSchemaProviderTypeService>(soapSerializer);
+			Trace.TraceInformation(wsdl);
+			Assert.IsNotNull(wsdl);
+
+			var root = XElement.Parse(wsdl);
+			var nm = Namespaces.CreateDefaultXmlNamespaceManager();
+
+			var responseDateElem = root.XPathSelectElement("//xsd:element[@name='GetDateResponse']/xsd:complexType/xsd:sequence/xsd:element[@name='GetDateResult' and contains(@type, ':date')]", nm);
+			Assert.IsNotNull(responseDateElem);
+		}
+
+		[DataTestMethod]
+		[DataRow(SoapSerializer.XmlSerializer)]
+		[DataRow(SoapSerializer.DataContractSerializer)]
+		public async Task CheckTestMultipleTypesServiceWsdl(SoapSerializer soapSerializer)
+		{
+			var wsdl = await GetWsdlFromMetaBodyWriter<TestMultipleTypesService>(soapSerializer);
 			Trace.TraceInformation(wsdl);
 			Assert.IsNotNull(wsdl);
 		}
 
 		[TestMethod]
-		public async Task CheckXmlSchemaProviderTypeServiceWsdl()
+		public async Task CheckArrayServiceWsdl()
 		{
-			var wsdl = await GetWsdlFromMetaBodyWriter<XmlSchemaProviderTypeService>();
+			var wsdl = await GetWsdlFromMetaBodyWriter<ArrayService>(SoapSerializer.XmlSerializer);
 			Trace.TraceInformation(wsdl);
 			Assert.IsNotNull(wsdl);
+
+			var root = XElement.Parse(wsdl);
+			var nm = Namespaces.CreateDefaultXmlNamespaceManager();
+
+			var nullableArray = root.XPathSelectElement("//xsd:complexType[@name='ArrayRequest']/xsd:sequence/xsd:element[@name='LongNullableArray' and @type='tns:ArrayOfNullableLong' and @nillable='true']", nm);
+			Assert.IsNotNull(nullableArray);
+
+			var array = root.XPathSelectElement("//xsd:complexType[@name='ArrayRequest']/xsd:sequence/xsd:element[@name='LongArray' and @type='tns:ArrayOfLong' and @nillable='true']", nm);
+			Assert.IsNotNull(array);
+
+			var arrayArray = root.XPathSelectElement("//xsd:complexType[@name='ArrayRequest']/xsd:sequence/xsd:element[@name='LongArrayArray' and @type='tns:ArrayOfArrayOfLong' and @nillable='true']", nm);
+			Assert.IsNotNull(arrayArray);
+
+			var stringListList = root.XPathSelectElement("//xsd:complexType[@name='ArrayRequest']/xsd:sequence/xsd:element[@name='StringListList' and @type='tns:ArrayOfArrayOfString' and @nillable='true']", nm);
+			Assert.IsNotNull(stringListList);
+
+			var nullableEnumerable = root.XPathSelectElement("//xsd:complexType[@name='EnumerableResponse']/xsd:sequence/xsd:element[@name='LongNullableEnumerable' and @type='tns:ArrayOfNullableLong' and @nillable='true']", nm);
+			Assert.IsNotNull(nullableEnumerable);
+
+			var enumerable = root.XPathSelectElement("//xsd:complexType[@name='EnumerableResponse']/xsd:sequence/xsd:element[@name='LongEnumerable' and @type='tns:ArrayOfLong' and @nillable='true']", nm);
+			Assert.IsNotNull(enumerable);
+
+			var enumerableEnumberable = root.XPathSelectElement("//xsd:complexType[@name='EnumerableResponse']/xsd:sequence/xsd:element[@name='LongEnumerableEnumerable' and @type='tns:ArrayOfArrayOfLong' and @nillable='true']", nm);
+			Assert.IsNotNull(enumerableEnumberable);
+
+			var stringEnumerableEnumberable = root.XPathSelectElement("//xsd:complexType[@name='EnumerableResponse']/xsd:sequence/xsd:element[@name='StringEnumerableEnumerable' and @type='tns:ArrayOfArrayOfString' and @nillable='true']", nm);
+			Assert.IsNotNull(stringEnumerableEnumberable);
 		}
 
 		[TestMethod]
-		public async Task CheckTestMultipleTypesServiceWsdl()
+		public void CheckFieldMembers()
 		{
-			var wsdl = await GetWsdlFromMetaBodyWriter<TestMultipleTypesService>();
-			Trace.TraceInformation(wsdl);
-			Assert.IsNotNull(wsdl);
+			StartService(typeof(OperationContractFieldMembersService));
+			var wsdl = GetWsdl();
+			StopServer();
+
+			var root = XElement.Parse(wsdl);
+			int fieldElementsCount = GetElements(root, _xmlSchema + "element")
+				.Where(a => a.Attribute("name")?.Value.Contains("FieldMember") == true)
+				.Count();
+			Assert.AreEqual(5, fieldElementsCount);
+
+			int propElementsCount = GetElements(root, _xmlSchema + "element")
+				.Where(a => a.Attribute("name")?.Value.Contains("PropMember") == true)
+				.Count();
+			Assert.AreEqual(5, propElementsCount);
 		}
 
 		[TestMethod]
+		public void CheckFieldMembersASMX()
+		{
+			StartService(typeof(OperationContractFieldMembersServiceWrapped));
+			var wsdl = GetWsdlFromAsmx();
+			StopServer();
+
+			var root = XElement.Parse(wsdl);
+			int fieldElementsCount = GetElements(root, _xmlSchema + "element")
+				.Where(a => a.Attribute("name")?.Value.Contains("FieldMember") == true)
+				.Count();
+			Assert.AreEqual(5, fieldElementsCount);
+
+			int propElementsCount = GetElements(root, _xmlSchema + "element")
+				.Where(a => a.Attribute("name")?.Value.Contains("PropMember") == true)
+				.Count();
+			Assert.AreEqual(5, propElementsCount);
+		}
+
+		[DataTestMethod]
 		public async Task CheckXmlAnnotatedTypeServiceWsdl()
 		{
-			var wsdl = await GetWsdlFromMetaBodyWriter<XmlModelsService>();
+			var wsdl = await GetWsdlFromMetaBodyWriter<XmlModelsService>(SoapSerializer.XmlSerializer);
 			Trace.TraceInformation(wsdl);
 			Assert.IsNotNull(wsdl);
 
@@ -453,6 +686,12 @@ namespace SoapCore.Tests.Wsdl
 			var dynamicTypeElement2 = root.XPathSelectElement("//xsd:complexType[@name='ArrayOfTestDataTypeData1']/xsd:sequence/xsd:element[@name='Data2']", nm);
 			Assert.IsNotNull(dynamicTypeElement2);
 
+			var choiceTypeElement = root.XPathSelectElement("//xsd:complexType[@name='TestResponseType']/xsd:sequence/xsd:choice[@minOccurs='0'and @maxOccurs='unbounded']/xsd:element[@name='Data4']", nm);
+			Assert.IsNotNull(choiceTypeElement);
+
+			var choiceTypeElement2 = root.XPathSelectElement("//xsd:complexType[@name='TestResponseType']/xsd:sequence/xsd:choice[@minOccurs='0'and @maxOccurs='unbounded']/xsd:element[@name='Data5']", nm);
+			Assert.IsNotNull(choiceTypeElement2);
+
 			var propRootAttribute = root.XPathSelectElement("//xsd:attribute[@name='PropRoot']", nm);
 			Assert.IsNotNull(propRootAttribute);
 
@@ -463,10 +702,41 @@ namespace SoapCore.Tests.Wsdl
 			Assert.IsNotNull(propAnonAttribute);
 		}
 
-		[TestMethod]
+		[DataTestMethod]
+		public async Task CheckXmlAnnotatedChoiceReturnServiceWsdl()
+		{
+			var wsdl = await GetWsdlFromMetaBodyWriter<XmlAnnotatedChoiceReturnService>(SoapSerializer.XmlSerializer);
+			Trace.TraceInformation(wsdl);
+			Assert.IsNotNull(wsdl);
+
+			Assert.IsFalse(wsdl.Contains("name=\"\""));
+
+			var root = XElement.Parse(wsdl);
+			var nm = Namespaces.CreateDefaultXmlNamespaceManager();
+
+			var requestTypeElement = root.XPathSelectElement("//xsd:element[@name='GetResponseResponse']", nm);
+			Assert.IsNotNull(requestTypeElement);
+
+			var choiceElement = root.XPathSelectElement("//xsd:element[@name='GetResponseResponse']/xsd:complexType/xsd:sequence/xsd:choice", nm);
+			Assert.IsNotNull(choiceElement);
+
+			var resultResponseElement = root.XPathSelectElement("//xsd:element[@name='GetResponseResponse']/xsd:complexType/xsd:sequence/xsd:choice/xsd:element[@name='resultResp']", nm);
+			Assert.IsNotNull(resultResponseElement);
+
+			var integerElement = root.XPathSelectElement("//xsd:element[@name='GetResponseResponse']/xsd:complexType/xsd:sequence/xsd:choice/xsd:element[@name='integerNumber']", nm);
+			Assert.IsNotNull(integerElement);
+
+			var choiceComplexTypeElement = root.XPathSelectElement("//xsd:complexType[@name='ResultResponse']", nm);
+			Assert.IsNotNull(choiceComplexTypeElement);
+
+			Assert.IsNotNull(choiceComplexTypeElement.XPathSelectElement("//xsd:complexType/xsd:sequence/xsd:choice/xsd:element[@name='first' and @type='xsd:int']", nm));
+			Assert.IsNotNull(choiceComplexTypeElement.XPathSelectElement("//xsd:complexType/xsd:sequence/xsd:choice/xsd:element[@name='second' and @type='xsd:string']", nm));
+		}
+
+		[DataTestMethod]
 		public async Task CheckMessageHeadersServiceWsdl()
 		{
-			var wsdl = await GetWsdlFromMetaBodyWriter<MessageHeadersService>();
+			var wsdl = await GetWsdlFromMetaBodyWriter<MessageHeadersService>(SoapSerializer.XmlSerializer);
 			Trace.TraceInformation(wsdl);
 			Assert.IsNotNull(wsdl);
 
@@ -477,6 +747,67 @@ namespace SoapCore.Tests.Wsdl
 
 			var stringPropertyElement = root.XPathSelectElement("//xsd:element[@name='ModifiedStringProperty']", nm);
 			Assert.IsNotNull(stringPropertyElement);
+		}
+
+		[TestMethod]
+		public async Task CheckDefaultValueAttributesServiceWsdl()
+		{
+			var wsdl = await GetWsdlFromMetaBodyWriter<DefaultValueAttributesService>(SoapSerializer.XmlSerializer);
+			Trace.TraceInformation(wsdl);
+			Assert.IsNotNull(wsdl);
+
+			Assert.IsFalse(wsdl.Contains("name=\"\""));
+
+			var root = XElement.Parse(wsdl);
+			var nm = Namespaces.CreateDefaultXmlNamespaceManager();
+
+			var booleanWithNoDefaultPropertyElement = root.XPathSelectElement("//xsd:element[@name='BooleanWithNoDefaultProperty' and @minOccurs='1' and @maxOccurs='1' and not(@default)]", nm);
+			Assert.IsNotNull(booleanWithNoDefaultPropertyElement);
+
+			var booleanWithDefaultNullPropertyElement = root.XPathSelectElement("//xsd:element[@name='BooleanWithDefaultNullProperty' and @minOccurs='1' and @maxOccurs='1' and not(@default)]", nm);
+			Assert.IsNotNull(booleanWithDefaultNullPropertyElement);
+
+			var booleanWithDefaultFalsePropertyElement = root.XPathSelectElement("//xsd:element[@name='BooleanWithDefaultFalseProperty' and @minOccurs='0' and @maxOccurs='1' and @default='false']", nm);
+			Assert.IsNotNull(booleanWithDefaultFalsePropertyElement);
+
+			var booleanWithDefaultTruePropertyElement = root.XPathSelectElement("//xsd:element[@name='BooleanWithDefaultTrueProperty' and @minOccurs='0' and @maxOccurs='1' and @default='true']", nm);
+			Assert.IsNotNull(booleanWithDefaultTruePropertyElement);
+
+			var intWithNoDefaultPropertyElement = root.XPathSelectElement("//xsd:element[@name='IntWithNoDefaultProperty' and @minOccurs='1' and @maxOccurs='1' and not(@default)]", nm);
+			Assert.IsNotNull(intWithNoDefaultPropertyElement);
+
+			var intWithDefaultPropertyElement = root.XPathSelectElement("//xsd:element[@name='IntWithDefaultProperty' and @minOccurs='0' and @maxOccurs='1' and @default='42']", nm);
+			Assert.IsNotNull(intWithDefaultPropertyElement);
+
+			var stringWithNoDefaultPropertyElement = root.XPathSelectElement("//xsd:element[@name='StringWithNoDefaultProperty' and @minOccurs='0' and @maxOccurs='1' and not(@default)]", nm);
+			Assert.IsNotNull(stringWithNoDefaultPropertyElement);
+
+			var stringWithDefaultNullPropertyElement = root.XPathSelectElement("//xsd:element[@name='StringWithDefaultNullProperty' and @minOccurs='0' and @maxOccurs='1' and not(@default)]", nm);
+			Assert.IsNotNull(stringWithDefaultNullPropertyElement);
+
+			var stringWithDefaultPropertyElement = root.XPathSelectElement("//xsd:element[@name='StringWithDefaultProperty' and @minOccurs='0' and @maxOccurs='1' and @default='default']", nm);
+			Assert.IsNotNull(stringWithDefaultPropertyElement);
+		}
+
+		[TestMethod]
+		public async Task CheckDataContractKnownTypeAttributeServiceWsdl()
+		{
+			var wsdl = await GetWsdlFromMetaBodyWriter<TestService>(SoapSerializer.DataContractSerializer);
+			Trace.TraceInformation(wsdl);
+			Assert.IsNotNull(wsdl);
+
+			Assert.IsFalse(wsdl.Contains("name=\"\""));
+
+			var root = XElement.Parse(wsdl);
+			var nm = Namespaces.CreateDefaultXmlNamespaceManager();
+
+			var schemaElement = root.XPathSelectElement("//xsd:schema[@targetNamespace='http://schemas.datacontract.org/2004/07/SoapCore.Tests.Model']", nm);
+			Assert.IsNotNull(schemaElement);
+
+			Assert.IsNotNull(schemaElement.XPathSelectElement("//xsd:complexType[@name='ComplexInheritanceModelInputA']/xsd:complexContent/xsd:extension[@base='tns:ComplexInheritanceModelInputBase']", nm));
+			Assert.IsNotNull(schemaElement.XPathSelectElement("//xsd:element[@name='ComplexInheritanceModelInputA' and @type='tns:ComplexInheritanceModelInputA']", nm));
+			Assert.IsNotNull(schemaElement.XPathSelectElement("//xsd:complexType[@name='ComplexInheritanceModelInputB']/xsd:complexContent/xsd:extension[@base='tns:ComplexInheritanceModelInputA']", nm));
+			Assert.IsNotNull(schemaElement.XPathSelectElement("//xsd:element[@name='ComplexInheritanceModelInputB' and @type='tns:ComplexInheritanceModelInputB']", nm));
 		}
 
 		[TestCleanup]
@@ -516,15 +847,18 @@ namespace SoapCore.Tests.Wsdl
 			}
 		}
 
-		private async Task<string> GetWsdlFromMetaBodyWriter<T>()
+		private async Task<string> GetWsdlFromMetaBodyWriter<T>(SoapSerializer serializer, string bindingName = null, string portName = null)
 		{
 			var service = new ServiceDescription(typeof(T));
 			var baseUrl = "http://tempuri.org/";
 			var xmlNamespaceManager = Namespaces.CreateDefaultXmlNamespaceManager();
-			var bodyWriter = new MetaBodyWriter(service, baseUrl, null, xmlNamespaceManager);
-			var encoder = new SoapMessageEncoder(MessageVersion.Soap12WSAddressingAugust2004, System.Text.Encoding.UTF8, XmlDictionaryReaderQuotas.Max, false, true);
+			var defaultBindingName = !string.IsNullOrWhiteSpace(bindingName) ? bindingName : "BasicHttpBinding";
+			var bodyWriter = serializer == SoapSerializer.DataContractSerializer
+				? new MetaWCFBodyWriter(service, baseUrl, defaultBindingName, false, new[] { new SoapBindingInfo(MessageVersion.None, bindingName, portName) }) as BodyWriter
+				: new MetaBodyWriter(service, baseUrl, xmlNamespaceManager, defaultBindingName, new[] { new SoapBindingInfo(MessageVersion.None, bindingName, portName) }) as BodyWriter;
+			var encoder = new SoapMessageEncoder(MessageVersion.Soap12WSAddressingAugust2004, Encoding.UTF8, false, XmlDictionaryReaderQuotas.Max, false, true, false, null, bindingName, portName);
 			var responseMessage = Message.CreateMessage(encoder.MessageVersion, null, bodyWriter);
-			responseMessage = new MetaMessage(responseMessage, service, null, xmlNamespaceManager);
+			responseMessage = new MetaMessage(responseMessage, service, xmlNamespaceManager, defaultBindingName, false);
 
 			using (var memoryStream = new MemoryStream())
 			{
@@ -541,18 +875,17 @@ namespace SoapCore.Tests.Wsdl
 
 		private void StartService(Type serviceType)
 		{
-			Task.Run(() =>
-			{
-				_host = new WebHostBuilder()
-					.UseKestrel()
-					.UseUrls("http://127.0.0.1:0")
-					.ConfigureServices(services => services.AddSingleton<IStartupConfiguration>(new StartupConfiguration(serviceType)))
-					.UseStartup<Startup>()
-					.Build();
+			_host = new WebHostBuilder()
+				.UseKestrel()
+				.UseUrls("http://127.0.0.1:0")
+				.ConfigureServices(services => services.AddSingleton<IStartupConfiguration>(new StartupConfiguration(serviceType)))
+				.UseStartup<Startup>()
+				.Build();
 
-				_host.Run();
-			});
+			_ = _host.RunAsync();
 
+			//Don't think this is true anymore and can't reproduce the behaviour locally if I remove the code below but not confident enough to remove it...
+			//
 			//There's a race condition without this check, the host may not have an address immediately and we need to wait for it but the collection
 			//may actually be totally empty, All() will be true if the collection is empty.
 			while (_host == null || _host.ServerFeatures.Get<IServerAddressesFeature>().Addresses.All(a => a.EndsWith(":0")))

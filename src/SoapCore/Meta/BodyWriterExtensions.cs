@@ -13,16 +13,16 @@ namespace SoapCore.Meta
 	public static class BodyWriterExtensions
 	{
 		//switches to easily revert to previous behaviour if there is a problem
-		private static bool useXmlSchemaProvider = true;
-		private static bool useXmlReflectionImporter = false;
-		public static bool TryAddSchemaTypeFromXmlSchemaProviderAttribute(this XmlDictionaryWriter writer, Type type, string name, SoapSerializer serializer, XmlNamespaceManager xmlNamespaceManager = null)
+		private static readonly bool UseXmlSchemaProvider = true;
+		private static readonly bool UseXmlReflectionImporter = false;
+		public static bool TryAddSchemaTypeFromXmlSchemaProviderAttribute(this XmlDictionaryWriter writer, Type type, string name, SoapSerializer serializer, XmlNamespaceManager xmlNamespaceManager = null, bool isUnqualified = false)
 		{
-			if (!useXmlSchemaProvider && !useXmlReflectionImporter)
+			if (!UseXmlSchemaProvider && !UseXmlReflectionImporter)
 			{
 				return false;
 			}
 
-			if (useXmlReflectionImporter)
+			if (UseXmlReflectionImporter)
 			{
 				var schemas = new XmlSchemas();
 				var xmlImporter = new XmlReflectionImporter();
@@ -32,11 +32,12 @@ namespace SoapCore.Meta
 				exporter.ExportTypeMapping(xmlTypeMapping);
 				schemas.Compile(null, true);
 
-				var memoryStream = new MemoryStream();
+				using var memoryStream = new MemoryStream();
 				foreach (XmlSchema schema in schemas)
 				{
 					schema.Write(memoryStream);
 				}
+
 				memoryStream.Position = 0;
 
 				var streamReader = new StreamReader(memoryStream);
@@ -58,6 +59,7 @@ namespace SoapCore.Meta
 				{
 					schema.Namespaces = xmlNamespaceManager.Convert();
 				}
+
 				if (xmlSchemaProviderAttribute.IsAny)
 				{
 					//MetaWCFBodyWriter usage....
@@ -82,26 +84,49 @@ namespace SoapCore.Meta
 						MinOccurs = 0,
 						MaxOccurs = 1,
 						Name = name,
-						IsNillable = serializer == SoapSerializer.DataContractSerializer ? true : false,
+						IsNillable = serializer == SoapSerializer.DataContractSerializer,
 						SchemaType = complex
 					};
+					if (isUnqualified)
+					{
+						element.Form = XmlSchemaForm.Unqualified;
+					}
+
 					schema.Items.Add(element);
 				}
 				else
 				{
 					var methodInfo = type.GetMethod(xmlSchemaProviderAttribute.MethodName, BindingFlags.Static | BindingFlags.Public);
-					var xmlSchemaType = (XmlSchemaType)methodInfo.Invoke(null, new object[] { xmlSchemaSet });
+					var xmlSchemaInfoObject = methodInfo.Invoke(null, new object[] { xmlSchemaSet });
 					var element = new XmlSchemaElement()
 					{
 						MinOccurs = 0,
 						MaxOccurs = 1,
 						Name = name,
-						SchemaType = xmlSchemaType
 					};
+
+					if (xmlSchemaInfoObject is XmlQualifiedName xmlQualifiedName)
+					{
+						element.SchemaTypeName = xmlQualifiedName;
+					}
+					else if (xmlSchemaInfoObject is XmlSchemaType xmlSchemaType)
+					{
+						element.SchemaType = xmlSchemaType;
+					}
+					else
+					{
+						throw new InvalidOperationException($"Invalid {nameof(xmlSchemaInfoObject)} type: {xmlSchemaInfoObject.GetType()}");
+					}
+
+					if (isUnqualified)
+					{
+						element.Form = XmlSchemaForm.Unqualified;
+					}
+
 					schema.Items.Add(element);
 				}
 
-				var memoryStream = new MemoryStream();
+				using var memoryStream = new MemoryStream();
 				schema.Write(memoryStream);
 				memoryStream.Position = 0;
 
@@ -118,15 +143,21 @@ namespace SoapCore.Meta
 			return false;
 		}
 
-		public static bool IsAttribute(this PropertyInfo property)
+		public static bool IsChoice(this MemberInfo member)
 		{
-			var attributeItem = property.GetCustomAttribute<XmlAttributeAttribute>();
+			var choiceItem = member.GetCustomAttribute<XmlChoiceIdentifierAttribute>();
+			return choiceItem != null || member.GetCustomAttributes<XmlElementAttribute>().Count() > 1;
+		}
+
+		public static bool IsAttribute(this MemberInfo member)
+		{
+			var attributeItem = member.GetCustomAttribute<XmlAttributeAttribute>();
 			return attributeItem != null;
 		}
 
-		public static bool IsIgnored(this PropertyInfo property)
+		public static bool IsIgnored(this MemberInfo member)
 		{
-			return property
+			return member
 				.CustomAttributes
 				.Any(attr =>
 					attr.AttributeType == typeof(IgnoreDataMemberAttribute) ||
@@ -160,13 +191,26 @@ namespace SoapCore.Meta
 		public static string GetSerializedTypeName(this Type type)
 		{
 			var namedType = type;
+			bool isNullableArray = false;
 			if (type.IsArray)
 			{
 				namedType = type.GetElementType();
+				var underlyingType = Nullable.GetUnderlyingType(namedType);
+				if (underlyingType != null)
+				{
+					namedType = underlyingType;
+					isNullableArray = true;
+				}
 			}
 			else if (typeof(IEnumerable).IsAssignableFrom(type) && type.IsGenericType)
 			{
 				namedType = GetGenericType(type);
+				var underlyingType = Nullable.GetUnderlyingType(namedType);
+				if (underlyingType != null)
+				{
+					namedType = underlyingType;
+					isNullableArray = true;
+				}
 			}
 
 			string typeName = namedType.Name;
@@ -176,17 +220,22 @@ namespace SoapCore.Meta
 				typeName = xmlTypeAttribute.TypeName;
 			}
 
-			if (type.IsArray)
+			if (type.IsArray || (typeof(IEnumerable).IsAssignableFrom(type) && type.IsGenericType))
 			{
-				typeName = "ArrayOf" + typeName.Replace("[]", string.Empty);
-			}
+				if (namedType.IsArray || (typeof(IEnumerable).IsAssignableFrom(type) && type.IsGenericType))
+				{
+					typeName = GetSerializedTypeName(namedType);
+				}
 
-			if (typeof(IEnumerable).IsAssignableFrom(type) && type.IsGenericType)
-			{
-				typeName = "ArrayOf" + typeName;
+				typeName = GetArrayTypeName(typeName.Replace("[]", string.Empty), isNullableArray);
 			}
 
 			return typeName;
+		}
+
+		private static string GetArrayTypeName(string typeName, bool isNullable)
+		{
+			return "ArrayOf" + (isNullable ? "Nullable" : null) + (ClrTypeResolver.ResolveOrDefault(typeName).FirstCharToUpperOrDefault() ?? typeName);
 		}
 
 		private static XmlSerializerNamespaces Convert(this XmlNamespaceManager xmlNamespaceManager)
@@ -198,6 +247,16 @@ namespace SoapCore.Meta
 			}
 
 			return xmlSerializerNamespaces;
+		}
+
+		private static string FirstCharToUpperOrDefault(this string input)
+		{
+			if (string.IsNullOrEmpty(input))
+			{
+				return input;
+			}
+
+			return input.First().ToString().ToUpper() + input.Substring(1);
 		}
 	}
 }
