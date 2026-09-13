@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -57,7 +58,7 @@ namespace SoapCore
 		{
 			int blockSize = 256;
 			int bytesRead = 0;
-			byte[] block = new byte[blockSize];
+			byte[] block = ArrayPool<byte>.Shared.Rent(blockSize);
 			var stream = (Stream)value;
 			stream.Position = 0;
 
@@ -76,9 +77,12 @@ namespace SoapCore
 				if (blockSize < 65536 && bytesRead == blockSize)
 				{
 					blockSize = blockSize * 16;
-					block = new byte[blockSize];
+					ArrayPool<byte>.Shared.Return(block);
+					block = ArrayPool<byte>.Shared.Rent(blockSize);
 				}
 			}
+
+			ArrayPool<byte>.Shared.Return(block);
 		}
 
 		private void OnWriteXmlSerializerBodyContents(XmlDictionaryWriter writer)
@@ -147,11 +151,7 @@ namespace SoapCore
 
 					if (shouldInline)
 					{
-						var memberInformation = resultType.GetMembersWithAttribute<MessageBodyMemberAttribute>().Select(mi => new
-						{
-							Member = mi,
-							MessageBodyMemberAttribute = mi.GetCustomAttribute<MessageBodyMemberAttribute>()
-						}).OrderBy(x => x.MessageBodyMemberAttribute?.Order ?? 0);
+						var memberInformation = resultType.GetMembersWithAttribute<MessageBodyMemberAttribute>().OrderBy(x => x.Attribute?.Order ?? 0);
 
 						if (messageContractAttribute != null && messageContractAttribute.IsWrapped)
 						{
@@ -163,8 +163,8 @@ namespace SoapCore
 							var memberType = memberInfo.Member.GetPropertyOrFieldType();
 							var memberValue = memberInfo.Member.GetPropertyOrFieldValue(_result);
 
-							var memberName = memberInfo.MessageBodyMemberAttribute?.Name ?? memberInfo.Member.Name;
-							var memberNamespace = memberInfo.MessageBodyMemberAttribute?.Namespace ?? _serviceNamespace;
+							var memberName = memberInfo.Attribute?.Name ?? memberInfo.Member.Name;
+							var memberNamespace = memberInfo.Attribute?.Namespace ?? _serviceNamespace;
 
 							var serializer = CachedXmlSerializer.GetXmlSerializer(memberType, memberName, memberNamespace);
 
@@ -189,8 +189,6 @@ namespace SoapCore
 					}
 					else
 					{
-						var serializer = CachedXmlSerializer.GetXmlSerializer(resultType, xmlName, xmlNs);
-
 						if (_result is Stream)
 						{
 							writer.WriteStartElement(_resultName, _serviceNamespace);
@@ -211,6 +209,7 @@ namespace SoapCore
 								xElement.WriteTo(writer);
 								writer.WriteEndElement();
 							}
+
 							//https://github.com/DigDes/SoapCore/issues/385
 							else if (_operation.DispatchMethod.GetCustomAttribute<XmlSerializerFormatAttribute>()?.Style == OperationFormatStyle.Rpc)
 							{
@@ -222,6 +221,7 @@ namespace SoapCore
 							}
 							else
 							{
+								var serializer = CachedXmlSerializer.GetXmlSerializer(resultType, xmlName, xmlNs);
 								//https://github.com/DigDes/SoapCore/issues/719
 								serializer.Serialize(writer, _result);
 							}
@@ -239,7 +239,7 @@ namespace SoapCore
 				}
 				else if (outResult.Value is bool)
 				{
-					value = outResult.Value.ToString().ToLower();
+					value = (bool)outResult.Value ? "true" : "false";
 				}
 				else if (outResult.Value is string)
 				{
@@ -256,23 +256,22 @@ namespace SoapCore
 				else
 				{
 					//for complex types
-					using (var stream = new MemoryStream())
-					{
-						// write element with name as outResult.Key and type information as outResultType
-						// i.e. <outResult.Key xsi:type="outResultType" ... />
-						var outResultType = outResult.Value.GetType();
-						var serializer = CachedXmlSerializer.GetXmlSerializer(outResultType, outResult.Key, _serviceNamespace);
-						serializer.Serialize(stream, outResult.Value);
+					var stream = new MemoryStream();
 
-						//add outResultType. ugly, but working
-						stream.Position = 0;
-						XmlDocument xdoc = new XmlDocument();
-						xdoc.Load(stream);
-						var attr = xdoc.CreateAttribute("xsi", "type", Namespaces.XMLNS_XSI);
-						attr.Value = outResultType.Name;
-						xdoc.DocumentElement.Attributes.Prepend(attr);
-						writer.WriteRaw(xdoc.DocumentElement.OuterXml);
-					}
+					// write element with name as outResult.Key and type information as outResultType
+					// i.e. <outResult.Key xsi:type="outResultType" ... />
+					var outResultType = outResult.Value.GetType();
+					var serializer = CachedXmlSerializer.GetXmlSerializer(outResultType, outResult.Key, _serviceNamespace);
+					serializer.Serialize(stream, outResult.Value);
+
+					//add outResultType. ugly, but working
+					stream.Position = 0;
+					XmlDocument xdoc = new XmlDocument();
+					xdoc.Load(stream);
+					var attr = xdoc.CreateAttribute("xsi", "type", Namespaces.XMLNS_XSI);
+					attr.Value = outResultType.Name;
+					xdoc.DocumentElement.Attributes.Prepend(attr);
+					writer.WriteRaw(xdoc.DocumentElement.OuterXml);
 				}
 
 				if (value != null)
@@ -316,14 +315,14 @@ namespace SoapCore
 					if (operationResultType.IsAssignableFrom(resultType))
 					{
 						serializer = operationResultType.TryGetBaseTypeWithKnownTypes(out Type operationResultBaseTypeWithKnownTypes)
-							? new DataContractSerializer(operationResultBaseTypeWithKnownTypes, _resultName, _serviceNamespace, serviceKnownTypes)
-							: new DataContractSerializer(operationResultType, _resultName, _serviceNamespace, serviceKnownTypes);
+							? CachedDataContractSerializer.GetDataContractSerializer(operationResultBaseTypeWithKnownTypes, _resultName, _serviceNamespace, serviceKnownTypes)
+							: CachedDataContractSerializer.GetDataContractSerializer(operationResultType, _resultName, _serviceNamespace, serviceKnownTypes);
 					}
 					else
 					{
 						serializer = resultType.TryGetBaseTypeWithKnownTypes(out Type resultBaseTypeWithKnownTypes)
-							? new DataContractSerializer(resultBaseTypeWithKnownTypes, _resultName, _serviceNamespace, serviceKnownTypes)
-							: new DataContractSerializer(resultType, _resultName, _serviceNamespace, serviceKnownTypes);
+							? CachedDataContractSerializer.GetDataContractSerializer(resultBaseTypeWithKnownTypes, _resultName, _serviceNamespace, serviceKnownTypes)
+							: CachedDataContractSerializer.GetDataContractSerializer(resultType, _resultName, _serviceNamespace, serviceKnownTypes);
 					}
 
 					serializer.WriteObject(writer, _result);
@@ -340,7 +339,7 @@ namespace SoapCore
 				}
 				else if (outResult.Value is bool)
 				{
-					value = outResult.Value.ToString().ToLower();
+					value = (bool)outResult.Value ? "true" : "false";
 				}
 				else if (outResult.Value is string)
 				{
@@ -357,22 +356,20 @@ namespace SoapCore
 				else
 				{
 					//for complex types
-					using (var stream = new MemoryStream())
+					var stream = new MemoryStream();
+					Type outResultType = outResult.Value.GetType();
+					IEnumerable<Type> serviceKnownTypes = _operation
+						.GetServiceKnownTypesHierarchy()
+						.Select(x => x.Type);
+
+					var serializer = CachedDataContractSerializer.GetDataContractSerializer(outResultType, serviceKnownTypes);
+					serializer.WriteObject(stream, outResult.Value);
+
+					stream.Position = 0;
+					using (var reader = XmlReader.Create(stream))
 					{
-						Type outResultType = outResult.Value.GetType();
-						IEnumerable<Type> serviceKnownTypes = _operation
-							.GetServiceKnownTypesHierarchy()
-							.Select(x => x.Type);
-
-						var serializer = new DataContractSerializer(outResultType, serviceKnownTypes);
-						serializer.WriteObject(stream, outResult.Value);
-
-						stream.Position = 0;
-						using (var reader = XmlReader.Create(stream))
-						{
-							reader.MoveToContent();
-							value = reader.ReadInnerXml();
-						}
+						reader.MoveToContent();
+						value = reader.ReadInnerXml();
 					}
 				}
 

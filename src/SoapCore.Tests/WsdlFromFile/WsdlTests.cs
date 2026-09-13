@@ -96,6 +96,7 @@ namespace SoapCore.Tests.WsdlFromFile
 			nsmgr.AddNamespace("soapbind", "http://schemas.xmlsoap.org/wsdl/soap/");
 
 			var element = root.SelectSingleNode("/wsdl:definitions/wsdl:types/xs:schema/xs:import[1]", nsmgr);
+			var importWithoutSchemaLocation = root.SelectSingleNode("/wsdl:definitions/wsdl:types/xs:schema/xs:import[3]", nsmgr);
 
 			var addresses = _host.ServerFeatures.Get<IServerAddressesFeature>();
 			var address = addresses.Addresses.Single();
@@ -105,6 +106,9 @@ namespace SoapCore.Tests.WsdlFromFile
 			Assert.IsNotNull(element);
 			Assert.AreEqual(element.Attributes["namespace"]?.Value, "http://datex2.eu/schema/3/messageContainer");
 			Assert.AreEqual(element.Attributes["schemaLocation"]?.Value, url);
+			Assert.IsNotNull(importWithoutSchemaLocation);
+			Assert.IsNull(importWithoutSchemaLocation.Attributes["schemaLocation"]?.Value);
+			Assert.AreEqual(importWithoutSchemaLocation.Attributes["namespace"]?.Value, "http://datex2.eu/schema/3/commonExtension");
 		}
 
 		[TestCleanup]
@@ -162,7 +166,7 @@ namespace SoapCore.Tests.WsdlFromFile
 			_host = new WebHostBuilder()
 					.UseKestrel()
 					.UseUrls("http://127.0.0.1:0")
-					.ConfigureServices(services => services.AddSingleton<IStartupConfiguration>(new StartupConfiguration(serviceType, "SnapshotPull.wsdl")))
+					.ConfigureServices(services => services.AddSingleton<IStartupConfiguration>(new StartupConfiguration("Service", serviceType, "WSDL", "SnapshotPull.wsdl")))
 					.UseStartup<Startup>()
 					.Build();
 

@@ -25,18 +25,18 @@ namespace SoapCore
 			_exceptionTransformer = exceptionTransformer;
 		}
 
-		public Message ProvideFault(Exception exception, MessageVersion messageVersion, Message requestMessage, XmlNamespaceManager xmlNamespaceManager)
+		public Message ProvideFault(Exception exception, MessageVersion messageVersion, Message requestMessage, ConcurrentXmlNamespaceLookup xmlNamespaceLookup)
 		{
 			var bodyWriter = _exceptionTransformer == null ?
-				new FaultBodyWriter(exception, messageVersion) :
-				new FaultBodyWriter(exception, messageVersion, faultStringOverride: _exceptionTransformer.Transform(exception));
+				new FaultBodyWriter(exception, messageVersion, xmlNamespaceLookup) :
+				new FaultBodyWriter(exception, messageVersion, xmlNamespaceLookup, faultStringOverride: _exceptionTransformer.Transform(exception));
 
 			var soapCoreFaultMessage = Message.CreateMessage(messageVersion, null, bodyWriter);
 
 			T_MESSAGE customMessage = new T_MESSAGE
 			{
 				Message = soapCoreFaultMessage,
-				NamespaceManager = xmlNamespaceManager
+				XmlNamespaceLookup = xmlNamespaceLookup
 			};
 
 			return customMessage;

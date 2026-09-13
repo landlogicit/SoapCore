@@ -1,4 +1,6 @@
 using System;
+using System.Linq;
+using System.ServiceModel;
 using System.ServiceModel.Channels;
 using System.Xml;
 using SoapCore.ServiceModel;
@@ -9,23 +11,19 @@ namespace SoapCore.Meta
 	{
 		private readonly Message _message;
 		private readonly ServiceDescription _service;
-		private readonly XmlNamespaceManager _xmlNamespaceManager;
+		private readonly ConcurrentXmlNamespaceLookup _xmlNamespaceLookup;
 		private readonly string _bindingName;
 		private readonly bool _hasBasicAuthentication;
+		private readonly MessageVersion[] _soapVersions;
 
-		[Obsolete]
-		public MetaMessage(Message message, ServiceDescription service, Binding binding, XmlNamespaceManager xmlNamespaceManager)
-			: this(message, service, xmlNamespaceManager, binding?.Name, binding.HasBasicAuth())
+		public MetaMessage(Message message, ServiceDescription service, ConcurrentXmlNamespaceLookup xmlNamespaceLookup, string bindingName, bool hasBasicAuthentication, MessageVersion[] soapVersions)
 		{
-		}
-
-		public MetaMessage(Message message, ServiceDescription service, XmlNamespaceManager xmlNamespaceManager, string bindingName, bool hasBasicAuthentication)
-		{
-			_xmlNamespaceManager = xmlNamespaceManager;
+			_xmlNamespaceLookup = xmlNamespaceLookup;
 			_message = message;
 			_service = service;
 			_bindingName = bindingName;
 			_hasBasicAuthentication = hasBasicAuthentication;
+			_soapVersions = soapVersions;
 		}
 
 		public override MessageHeaders Headers => _message.Headers;
@@ -40,20 +38,22 @@ namespace SoapCore.Meta
 
 		protected override void OnWriteStartEnvelope(XmlDictionaryWriter writer)
 		{
-			writer.WriteStartElement(_xmlNamespaceManager.LookupPrefix(Namespaces.WSDL_NS), "definitions", Namespaces.WSDL_NS);
+			writer.WriteStartElement(_xmlNamespaceLookup.LookupPrefix(Namespaces.WSDL_NS), "definitions", Namespaces.WSDL_NS);
 
-			// Soap11
-			if (Version == MessageVersion.Soap11 || Version == MessageVersion.Soap11WSAddressingAugust2004 || Version == MessageVersion.Soap11WSAddressingAugust2004)
+			var wroteSoapNamespace = false;
+			if (_soapVersions.Any(version => version.Envelope == EnvelopeVersion.Soap11))
 			{
 				WriteXmlnsAttribute(writer, Namespaces.SOAP11_NS);
+				wroteSoapNamespace = true;
 			}
 
-			// Soap12
-			else if (Version == MessageVersion.Soap12WSAddressing10 || Version == MessageVersion.Soap12WSAddressingAugust2004)
+			if (_soapVersions.Any(version => version.Envelope == EnvelopeVersion.Soap12))
 			{
 				WriteXmlnsAttribute(writer, Namespaces.SOAP12_NS);
+				wroteSoapNamespace = true;
 			}
-			else
+
+			if (!wroteSoapNamespace)
 			{
 				throw new ArgumentOutOfRangeException(nameof(Version), "Unsupported MessageVersion encountered while writing envelope.");
 			}
@@ -69,7 +69,7 @@ namespace SoapCore.Meta
 			writer.WriteAttributeString("name", _service.ServiceName);
 			WriteXmlnsAttribute(writer, Namespaces.WSDL_NS);
 
-			if (!string.IsNullOrEmpty(_xmlNamespaceManager.LookupPrefix(Namespaces.MICROSOFT_TYPES)))
+			if (!string.IsNullOrEmpty(_xmlNamespaceLookup.LookupPrefix(Namespaces.MICROSOFT_TYPES)))
 			{
 				WriteXmlnsAttribute(writer, Namespaces.MICROSOFT_TYPES);
 			}
@@ -77,7 +77,7 @@ namespace SoapCore.Meta
 			if (_hasBasicAuthentication)
 			{
 				writer.WriteStartElement("Policy", Namespaces.WSP_NS);
-				writer.WriteAttributeString("Id", _xmlNamespaceManager.LookupPrefix(Namespaces.WSU_NS), $"{_bindingName}_{_service.GeneralContract.Name}_policy");
+				writer.WriteAttributeString("Id", _xmlNamespaceLookup.LookupPrefix(Namespaces.WSU_NS), $"{_bindingName}_{_service.GeneralContract.Name}_policy");
 				writer.WriteStartElement("ExactlyOne", Namespaces.WSP_NS);
 				writer.WriteStartElement("All", Namespaces.WSP_NS);
 				writer.WriteStartElement("BasicAuthentication", Namespaces.HTTP_NS);
@@ -107,7 +107,7 @@ namespace SoapCore.Meta
 
 		private void WriteXmlnsAttribute(XmlDictionaryWriter writer, string namespaceUri)
 		{
-			var prefix = string.IsNullOrEmpty(namespaceUri) ? null : _xmlNamespaceManager.LookupPrefix(namespaceUri);
+			var prefix = string.IsNullOrEmpty(namespaceUri) ? null : _xmlNamespaceLookup.LookupPrefix(namespaceUri);
 			writer.WriteXmlnsAttribute(prefix, namespaceUri);
 		}
 	}

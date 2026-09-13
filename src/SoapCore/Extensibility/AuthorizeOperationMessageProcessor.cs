@@ -25,27 +25,45 @@ namespace SoapCore.Extensibility
 		private readonly Dictionary<string, Type> _pathTypes;
 
 		/// <summary>
+		/// Whether to generate the soapAction without the contract name. This is also specified in the SoapOptions.
+		/// </summary>
+		private readonly bool _generateSoapActionWithoutContractName;
+
+		/// <summary>
 		/// Initializes a new instance of the <see cref="AuthorizeOperationMessageProcessor"/> class.
 		/// </summary>
 		/// <param name="pathAndTypes">A dictionary that has the path of the endpoint as Key and the corresponding type as Value. Similar to using the UseSoapEndpoint extension function.</param>
-		public AuthorizeOperationMessageProcessor(Dictionary<string, Type> pathAndTypes)
+		/// <param name="generateSoapActionWithoutContractName">Whether to generate the soapAction without the contract name. Default is false.</param>
+		public AuthorizeOperationMessageProcessor(Dictionary<string, Type> pathAndTypes, bool generateSoapActionWithoutContractName = false)
+			: this(pathAndTypes, options => options.GenerateSoapActionWithoutContractName = generateSoapActionWithoutContractName)
 		{
-			_pathTypes = pathAndTypes;
+		}
+
+		/// <summary>
+		/// Initializes a new instance of the <see cref="AuthorizeOperationMessageProcessor"/> class.
+		/// </summary>
+		/// <param name="pathAndTypes">A dictionary that has the path of the endpoint as Key and the corresponding type as Value. Similar to using the UseSoapEndpoint extension function.</param>
+		/// <param name="options">Action that returns the configured options.</param>
+		public AuthorizeOperationMessageProcessor(Dictionary<string, Type> pathAndTypes, Action<SoapCoreOptions> options)
+		{
+			var configuredOptions = new SoapCoreOptions() { Path = string.Empty };
+			options?.Invoke(configuredOptions);
+			_pathTypes = new Dictionary<string, Type>(pathAndTypes, configuredOptions.CaseInsensitivePath ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+			_generateSoapActionWithoutContractName = configuredOptions.GenerateSoapActionWithoutContractName;
 		}
 
 		public async Task<Message> ProcessMessage(Message requestMessage, HttpContext httpContext, Func<Message, Task<Message>> next)
 		{
 			var soapAction = HeadersHelper.GetSoapAction(httpContext, ref requestMessage);
-			requestMessage.Headers.Action = soapAction;
 
 			if (string.IsNullOrEmpty(soapAction))
 			{
 				throw new ArgumentException("Unable to handle request without a valid action parameter. Please supply a valid soap action.");
 			}
 
-			if (!_pathTypes.TryGetValue(httpContext.Request.Path.Value.ToLowerInvariant(), out Type serviceType) || !TryGetOperation(soapAction, serviceType, out var operation))
+			if (!_pathTypes.TryGetValue(httpContext.Request.Path.Value.ToLowerInvariant(), out Type serviceType) || !TryGetOperation(soapAction, serviceType, _generateSoapActionWithoutContractName, out var operation))
 			{
-				throw new InvalidOperationException($"No operation found for specified action: {soapAction}");
+				throw new InvalidOperationException($"No operation found for specified action: {soapAction.ToString()}");
 			}
 
 			MethodInfo methodInfo = operation!.DispatchMethod;
@@ -141,16 +159,35 @@ namespace SoapCore.Extensibility
 			}
 		}
 
-		private static bool TryGetOperation(string methodName, Type serviceType, out OperationDescription operation)
+		private static bool TryGetOperation(string methodNameStr, Type serviceType, bool generateSoapActionWithoutContractName, out OperationDescription operation)
 		{
-			var service = new ServiceDescription(serviceType);
-			operation = service.Operations.FirstOrDefault(o => o.SoapAction.Equals(methodName, StringComparison.Ordinal)
-							|| o.Name.Equals(HeadersHelper.GetTrimmedSoapAction(methodName), StringComparison.Ordinal)
-							|| methodName.Equals(HeadersHelper.GetTrimmedSoapAction(o.Name), StringComparison.Ordinal));
+			ReadOnlySpan<char> methodName = methodNameStr.AsSpan();
 
-			operation ??= service.Operations.FirstOrDefault(o =>
-							methodName.Equals(HeadersHelper.GetTrimmedClearedSoapAction(o.SoapAction), StringComparison.Ordinal)
-							|| methodName.Contains(HeadersHelper.GetTrimmedSoapAction(o.Name)));
+			var service = new ServiceDescription(serviceType, generateSoapActionWithoutContractName);
+			operation = null;
+			foreach (var o in service.Operations)
+			{
+				if (o.SoapAction.AsSpan().Equals(methodName, StringComparison.OrdinalIgnoreCase)
+							|| o.Name.AsSpan().Equals(HeadersHelper.GetTrimmedSoapAction(methodName), StringComparison.OrdinalIgnoreCase)
+							|| methodName.Equals(HeadersHelper.GetTrimmedSoapAction(o.Name.AsSpan()), StringComparison.OrdinalIgnoreCase))
+				{
+					operation = o;
+					break;
+				}
+			}
+
+			if (operation == null)
+			{
+				foreach (var o in service.Operations)
+				{
+					if (methodName.Equals(HeadersHelper.GetTrimmedClearedSoapAction(o.SoapAction.AsSpan()), StringComparison.OrdinalIgnoreCase)
+							|| methodName.IndexOf(HeadersHelper.GetTrimmedSoapAction(o.Name.AsSpan()), StringComparison.OrdinalIgnoreCase) >= 0)
+					{
+						operation = o;
+						break;
+					}
+				}
+			}
 
 			return operation != null;
 		}

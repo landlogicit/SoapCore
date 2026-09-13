@@ -1,18 +1,27 @@
-using SoapCore.Extensibility;
 using System;
 using System.Collections.Generic;
 using System.ServiceModel.Channels;
 using System.Xml;
+using SoapCore.Extensibility;
+using SoapCore.Serializer;
 
 namespace SoapCore
 {
 	public class SoapCoreOptions
 	{
+		private bool? _indentWsdl = null;
+
+#if NET8_0_OR_GREATER
+		/// <summary>
+		/// Gets or sets the Path of the Service
+		/// </summary>
+		required public string Path { get; set; }
+#else
 		/// <summary>
 		/// Gets or sets the Path of the Service
 		/// </summary>
 		public string Path { get; set; }
-
+#endif
 		/// <summary>
 		/// Gets or sets encoders
 		/// </summary>
@@ -35,13 +44,6 @@ namespace SoapCore
 		/// <para>Defaults to null</para>
 		/// </summary>
 		public ISoapModelBounder SoapModelBounder { get; set; } = null;
-
-		/// <summary>
-		/// Gets or sets a value indicating the binding to use
-		/// <para>Defaults to null</para>
-		/// </summary>
-		[Obsolete]
-		public Binding Binding { get; set; }
 
 		/// <summary>
 		/// Gets or sets a value whether to use basic authentication
@@ -74,20 +76,6 @@ namespace SoapCore
 		public bool HttpsPostEnabled { get; set; } = true;
 
 		/// <summary>
-		/// The maximum size in bytes of the in-memory <see cref="System.Buffers.ArrayPool{Byte}"/> used to buffer the
-		/// stream. Larger request bodies are written to disk.
-		/// </summary>
-		[Obsolete]
-		public int BufferThreshold { get; set; } = 1024 * 30;
-
-		/// <summary>
-		/// The maximum size in bytes of the request body. An attempt to read beyond this limit will cause an
-		/// <see cref="System.IO.IOException"/>.
-		/// </summary>
-		[Obsolete]
-		public long BufferLimit { get; set; }
-
-		/// <summary>
 		/// Gets or sets a value indicating whether to omit the Xml declaration (&lt;?xml version="1.0" encoding="utf-8"?&gt;) in responses
 		/// <para>Defaults to true</para>
 		/// </summary>
@@ -104,6 +92,12 @@ namespace SoapCore
 		/// <para>Defaults to true</para>
 		/// </summary>
 		public bool IndentXml { get; set; } = true;
+
+		/// <summary>
+		/// Gets or sets a value indicating whether to indent the generated WSDL.
+		/// <para>Defaults to the value of <see cref="IndentXml"/></para>
+		/// </summary>
+		public bool IndentWsdl { get => _indentWsdl ?? IndentXml; set => _indentWsdl = value; }
 
 		/// <summary>
 		/// Gets or sets a value indicating whether to check to make sure that the XmlOutput doesn't contain invalid characters
@@ -123,10 +117,63 @@ namespace SoapCore
 
 		public WsdlFileOptions WsdlFileOptions { get; set; }
 
+		/// <summary>
+		/// Get or sets a value indicating the use of custom serializer, use for if multiple custom serializer used to services
+		/// </summary>
+		internal Type SerializerIdentifier { get; set; }
 
 		/// <summary>
 		/// Sets additional namespace declaration attributes in envelope
 		/// </summary>
 		public Dictionary<string, string> AdditionalEnvelopeXmlnsAttributes { get; set; }
+
+		/// <summary>
+		/// By default, the soapAction that is generated if not explicitely specified is
+		/// {namespace}/{contractName}/{methodName}. If set to true, the service name will
+		/// be omitted, so that the soapAction will be {namespace}/{methodName}.
+		/// </summary>
+		public bool GenerateSoapActionWithoutContractName { get; set; } = false;
+
+		/// <summary>
+		/// Gets or sets a value indicating whether newlines in the SOAP XML responses
+		/// should be normalized to the system's default newline character (CRLF on Windows).
+		/// Default is true.
+		/// </summary>
+		public bool NormalizeNewLines { get; set; } = true;
+
+		/// <summary>
+		/// Can be used to override the HTTP Scheme in the generated service description. This can be useful
+		/// if you are behind a firewall and the firewall sets the X-Forwarded-Host header, but the
+		/// internal HTTP scheme is not the same as the external.
+		/// </summary>
+		public string SchemeOverride { get; set; }
+
+		/// <summary>
+		/// When true, only [XmlIgnore] is used to exclude properties from WSDL generation,
+		/// ignoring [IgnoreDataMember]. This matches legacy WCF/ASMX XmlSerializer behavior
+		/// where [IgnoreDataMember] had no effect on XmlSerializer.
+		/// <para>Defaults to false</para>
+		/// </summary>
+		public bool XmlIgnoreOnlyForWsdl { get; set; } = false;
+
+		/// <summary>
+		/// When true, uses legacy WCF/ASMX WSDL naming conventions:
+		/// portType name becomes {ContractName}Soap, and message names
+		/// use {OperationName}SoapIn/{OperationName}SoapOut pattern.
+		/// <para>Defaults to false</para>
+		/// </summary>
+		public bool UseLegacyWsdlNaming { get; set; } = false;
+
+		/// <summary>
+		/// Gets or sets a value indicating whether to reuse the same XmlNamespaceManager for all requests using the same binding and encoding, or create a new one for each request.
+		/// Reusing the same one can improve performance, but may cause issues if you modify the namespace manager in your code. Defaults to true.
+		/// </summary>
+		public bool ReuseXmlNamespaceManager { get; set; } = true;
+
+		public void UseCustomSerializer<TCustomSerializer>()
+			where TCustomSerializer : class, IXmlSerializationHandler
+		{
+			SerializerIdentifier = typeof(TCustomSerializer);
+		}
 	}
 }

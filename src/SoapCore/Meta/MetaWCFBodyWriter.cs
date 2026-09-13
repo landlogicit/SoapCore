@@ -65,22 +65,13 @@ namespace SoapCore.Meta
 		private bool _buildDateTimeOffset;
 		private bool _buildDataTable;
 		private string _schemaNamespace;
+		private IWsdlOperationNameGenerator _wsdlOperationNameGenerator;
 
-		[Obsolete]
-		public MetaWCFBodyWriter(ServiceDescription service, string baseUrl, Binding binding)
-			: this(
-				  service,
-				  baseUrl,
-				  binding?.Name ?? "BasicHttpBinding_" + service.GeneralContract.Name,
-				  binding.HasBasicAuth(),
-				  new[] { new SoapBindingInfo(binding.MessageVersion ?? MessageVersion.None, null, null) })
-		{
-		}
-
-		public MetaWCFBodyWriter(ServiceDescription service, string baseUrl, string bindingName, bool hasBasicAuthentication, SoapBindingInfo[] soapBindings) : base(isBuffered: true)
+		public MetaWCFBodyWriter(ServiceDescription service, string baseUrl, string bindingName, bool hasBasicAuthentication, SoapBindingInfo[] soapBindings, IWsdlOperationNameGenerator wsdlOperationNameGenerator) : base(isBuffered: true)
 		{
 			_service = service;
 			_baseUrl = baseUrl;
+			_wsdlOperationNameGenerator = wsdlOperationNameGenerator;
 
 			_arrayToBuild = new Queue<Type>();
 			_builtEnumTypes = new HashSet<string>();
@@ -653,23 +644,30 @@ namespace SoapCore.Meta
 
 			foreach (var types in groupedByNamespace.Distinct())
 			{
+				var targetNamespace = GetModelNamespace(types.Key);
 				writer.WriteStartElement("xs", "schema", Namespaces.XMLNS_XSD);
 				writer.WriteAttributeString("elementFormDefault", "qualified");
-				writer.WriteAttributeString("targetNamespace", GetModelNamespace(types.Key));
+				writer.WriteAttributeString("targetNamespace", targetNamespace);
 				writer.WriteXmlnsAttribute("xs", Namespaces.XMLNS_XSD);
-				writer.WriteXmlnsAttribute("tns", GetModelNamespace(types.Key));
+				writer.WriteXmlnsAttribute("tns", targetNamespace);
 				writer.WriteXmlnsAttribute("ser", Namespaces.SERIALIZATION_NS);
 
 				_namespaceCounter = 1;
-				_schemaNamespace = GetModelNamespace(types.Key);
+				_schemaNamespace = targetNamespace;
 
-				writer.WriteStartElement("xs", "import", Namespaces.XMLNS_XSD);
-				writer.WriteAttributeString("namespace", Namespaces.SYSTEM_NS);
-				writer.WriteEndElement();
+				if (targetNamespace != Namespaces.SYSTEM_NS)
+				{
+					writer.WriteStartElement("xs", "import", Namespaces.XMLNS_XSD);
+					writer.WriteAttributeString("namespace", Namespaces.SYSTEM_NS);
+					writer.WriteEndElement();
+				}
 
-				writer.WriteStartElement("xs", "import", Namespaces.XMLNS_XSD);
-				writer.WriteAttributeString("namespace", Namespaces.ARRAYS_NS);
-				writer.WriteEndElement();
+				if (targetNamespace != Namespaces.ARRAYS_NS)
+				{
+					writer.WriteStartElement("xs", "import", Namespaces.XMLNS_XSD);
+					writer.WriteAttributeString("namespace", Namespaces.ARRAYS_NS);
+					writer.WriteEndElement();
+				}
 
 				foreach (var type in types.Value.Distinct(new TypesComparer(GetTypeName)))
 				{
@@ -993,7 +991,7 @@ namespace SoapCore.Meta
 			{
 				// input
 				writer.WriteStartElement("wsdl", "message", Namespaces.WSDL_NS);
-				writer.WriteAttributeString("name", $"{BindingType}_{operation.Name}_InputMessage");
+				writer.WriteAttributeString("name", _wsdlOperationNameGenerator.GenerateWsdlInputMessageName(operation, _service));
 				writer.WriteStartElement("wsdl", "part", Namespaces.WSDL_NS);
 				writer.WriteAttributeString("name", "parameters");
 
@@ -1014,7 +1012,7 @@ namespace SoapCore.Meta
 				if (!operation.IsOneWay)
 				{
 					writer.WriteStartElement("wsdl", "message", Namespaces.WSDL_NS);
-					writer.WriteAttributeString("name", $"{BindingType}_{operation.Name}_OutputMessage");
+					writer.WriteAttributeString("name", _wsdlOperationNameGenerator.GenerateWsdlOutputMessageName(operation, _service));
 					writer.WriteStartElement("wsdl", "part", Namespaces.WSDL_NS);
 					writer.WriteAttributeString("name", "parameters");
 
@@ -1062,14 +1060,14 @@ namespace SoapCore.Meta
 				writer.WriteAttributeString("name", operation.Name);
 				writer.WriteStartElement("wsdl", "input", Namespaces.WSDL_NS);
 				writer.WriteAttributeString("wsam", "Action", Namespaces.WSAM_NS, operation.SoapAction);
-				writer.WriteAttributeString("message", $"tns:{BindingType}_{operation.Name}_InputMessage");
+				writer.WriteAttributeString("message", $"tns:{_wsdlOperationNameGenerator.GenerateWsdlInputMessageName(operation, _service)}");
 				writer.WriteEndElement(); // wsdl:input
 
 				if (!operation.IsOneWay)
 				{
 					writer.WriteStartElement("wsdl", "output", Namespaces.WSDL_NS);
 					writer.WriteAttributeString("wsam", "Action", Namespaces.WSAM_NS, operation.SoapAction + "Response");
-					writer.WriteAttributeString("message", $"tns:{BindingType}_{operation.Name}_OutputMessage");
+					writer.WriteAttributeString("message", $"tns:{_wsdlOperationNameGenerator.GenerateWsdlOutputMessageName(operation, _service)}");
 					writer.WriteEndElement(); // wsdl:output
 				}
 
@@ -1100,7 +1098,7 @@ namespace SoapCore.Meta
 				(var soap, var soapNamespace, var qualifiedBindingName, _) = GetSoapMetaParameters(bindingInfo);
 
 				writer.WriteStartElement("wsdl", "binding", Namespaces.WSDL_NS);
-				writer.WriteAttributeString("name", BindingName);
+				writer.WriteAttributeString("name", qualifiedBindingName);
 				writer.WriteAttributeString("type", "tns:" + BindingType);
 
 				writer.WriteStartElement(soap, "binding", soapNamespace);
@@ -1546,14 +1544,34 @@ namespace SoapCore.Meta
 
 		private string GetTypeName(Type type)
 		{
+			var dataContractAttribute = type.GetCustomAttribute<DataContractAttribute>();
+
 			if (type.IsGenericType && !type.IsArray && !typeof(IEnumerable).IsAssignableFrom(type))
 			{
-				var genericTypes = GetGenericTypes(type);
-				var genericTypeNames = genericTypes.Select(a => GetTypeName(a));
+				if (dataContractAttribute != null && dataContractAttribute.IsNameSetExplicitly)
+				{
+					var typeName = dataContractAttribute.Name;
+					var genericTypes = GetGenericTypes(type);
+					var genericTypeNames = genericTypes
+						.Select(genericType =>
+						{
+							var (name, _) = ResolveSystemType(genericType);
+							return string.IsNullOrEmpty(name) ? GetTypeName(genericType) : name;
+						})
+						.ToArray();
 
-				var typeName = ReplaceGenericNames(type.Name);
-				typeName = typeName + "Of" + string.Concat(genericTypeNames);
-				return typeName;
+					typeName = string.Format(typeName, genericTypeNames);
+					return typeName;
+				}
+				else
+				{
+					var genericTypes = GetGenericTypes(type);
+					var genericTypeNames = genericTypes.Select(a => GetTypeName(a));
+
+					var typeName = ReplaceGenericNames(type.Name);
+					typeName = typeName + "Of" + string.Concat(genericTypeNames);
+					return typeName;
+				}
 			}
 
 			if (type.IsArray)
@@ -1590,7 +1608,6 @@ namespace SoapCore.Meta
 			}
 
 			// Make use of DataContract attribute, if set, as it may contain a Name override
-			var dataContractAttribute = type.GetCustomAttribute<DataContractAttribute>();
 			if (dataContractAttribute != null && dataContractAttribute.IsNameSetExplicitly)
 			{
 				return dataContractAttribute.Name;
@@ -1639,7 +1656,7 @@ namespace SoapCore.Meta
 		private (string soapPrefix, string ns, string qualifiedBindingName, string qualifiedPortName) GetSoapMetaParameters(SoapBindingInfo bindingInfo)
 		{
 			int soapVersion = 11;
-			if (bindingInfo.MessageVersion == MessageVersion.Soap12WSAddressingAugust2004 || bindingInfo.MessageVersion == MessageVersion.Soap12WSAddressing10)
+			if (bindingInfo.MessageVersion.Envelope == EnvelopeVersion.Soap12)
 			{
 				soapVersion = 12;
 			}

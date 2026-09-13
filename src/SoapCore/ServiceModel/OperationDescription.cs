@@ -12,11 +12,24 @@ namespace SoapCore.ServiceModel
 {
 	public class OperationDescription
 	{
-		public OperationDescription(ContractDescription contract, MethodInfo operationMethod, OperationContractAttribute contractAttribute)
+		public OperationDescription(ContractDescription contract, MethodInfo operationMethod, OperationContractAttribute contractAttribute, bool generateSoapActionWithoutContractName)
 		{
 			Contract = contract;
 			Name = contractAttribute.Name ?? GetNameByAction(contractAttribute.Action) ?? GetNameByMethod(operationMethod);
-			SoapAction = contractAttribute.Action ?? $"{contract.Namespace.TrimEnd('/')}/{contract.Name}/{Name}";
+
+			if (contractAttribute.Action != null)
+			{
+				SoapAction = contractAttribute.Action;
+			}
+			else if (generateSoapActionWithoutContractName)
+			{
+				SoapAction = $"{contract.Namespace.TrimEnd('/')}/{Name}";
+			}
+			else
+			{
+				SoapAction = $"{contract.Namespace.TrimEnd('/')}/{contract.Name}/{Name}";
+			}
+
 			IsOneWay = contractAttribute.IsOneWay;
 			DispatchMethod = operationMethod;
 
@@ -69,6 +82,9 @@ namespace SoapCore.ServiceModel
 				.ToArray();
 
 			ServiceKnownTypes = operationMethod.GetCustomAttributes<ServiceKnownTypeAttribute>(inherit: false);
+
+			var soapHeader = operationMethod.GetCustomAttributes<SoapHeaderAttribute>(inherit: false);
+			HeaderType = soapHeader.FirstOrDefault()?.GetType();
 		}
 
 		public ContractDescription Contract { get; private set; }
@@ -90,6 +106,7 @@ namespace SoapCore.ServiceModel
 		public IEnumerable<ServiceKnownTypeAttribute> ServiceKnownTypes { get; private set; }
 		public IEnumerable<ReturnChoice> ReturnChoices { get; private set; }
 		public bool ReturnsChoice => ReturnChoices != null;
+		public Type HeaderType { get; set; }
 
 		public IEnumerable<ServiceKnownTypeAttribute> GetServiceKnownTypesHierarchy()
 		{
@@ -172,7 +189,7 @@ namespace SoapCore.ServiceModel
 
 		private static string GetNameByAction(string action)
 		{
-			var index = action?.LastIndexOf("/");
+			var index = action?.LastIndexOf('/');
 			return (index ?? -1) > -1
 				? action.Substring(index.Value + 1, action.Length - index.Value - 1)
 				: null;

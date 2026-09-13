@@ -1,9 +1,6 @@
-#if !NETCOREAPP3_1_OR_GREATER
-using Newtonsoft.Json;
-#endif
 using System.IO;
 using System.Linq;
-using System.Text;
+using System.Text.Json;
 using System.Xml;
 using System.Xml.Serialization;
 
@@ -49,13 +46,18 @@ namespace SoapCore.DocumentationWriter
 			return (SoapDefinition)xs.Deserialize(sr);
 		}
 
+		public static SoapDefinition DeserializeFromStream(Stream xml)
+		{
+			XmlSerializer xs = new XmlSerializer(typeof(SoapDefinition));
+
+			xs.UnknownElement += _unknownElementHandler;
+
+			return (SoapDefinition)xs.Deserialize(xml);
+		}
+
 		public string GenerateDocumentation()
 		{
-#if NETCOREAPP3_1_OR_GREATER
-			var json = System.Text.Json.JsonSerializer.Serialize(this);
-#else
-			var json = JsonConvert.SerializeObject(this);
-#endif
+			var json = JsonSerializer.Serialize(this);
 
 			var html = $@"<!DOCTYPE html>
 <html lang=""en"">

@@ -11,12 +11,14 @@ namespace SoapCore
 	public class FaultBodyWriter : BodyWriter
 	{
 		private readonly MessageVersion _version;
+		private readonly ConcurrentXmlNamespaceLookup _xmlNamespaceManager;
 		private readonly Exception _exception;
 		private readonly string _faultStringOverride;
 
-		public FaultBodyWriter(Exception exception, MessageVersion version, bool isBuffered = true, string faultStringOverride = null) : base(isBuffered)
+		public FaultBodyWriter(Exception exception, MessageVersion version, ConcurrentXmlNamespaceLookup xmlNamespaceManager, bool isBuffered = true, string faultStringOverride = null) : base(isBuffered)
 		{
 			_version = version;
+			_xmlNamespaceManager = xmlNamespaceManager;
 			_exception = exception;
 			_faultStringOverride = faultStringOverride;
 		}
@@ -47,7 +49,7 @@ namespace SoapCore
 
 			var faultString = _faultStringOverride ?? (_exception.InnerException != null ? _exception.InnerException.Message : _exception.Message);
 			var faultDetail = ExtractFaultDetailsAsXmlElement(_exception);
-			var prefix = writer.LookupPrefix(Namespaces.SOAP12_ENVELOPE_NS) ?? "s";
+			var prefix = _xmlNamespaceManager.LookupPrefix(Namespaces.SOAP12_ENVELOPE_NS) ?? "s";
 
 			writer.WriteStartElement(prefix, "Fault", Namespaces.SOAP12_ENVELOPE_NS);
 
@@ -80,6 +82,7 @@ namespace SoapCore
 		{
 			var faultString = _faultStringOverride ?? (_exception.InnerException != null ? _exception.InnerException.Message : _exception.Message);
 			var faultDetail = ExtractFaultDetailsAsXmlElement(_exception);
+			var faultCodePrefix = _xmlNamespaceManager.LookupPrefix(Namespaces.SOAP11_ENVELOPE_NS) ?? "s";
 
 			writer.WriteStartElement("Fault", Namespaces.SOAP11_ENVELOPE_NS);
 
@@ -107,6 +110,7 @@ namespace SoapCore
 				</s:Body>
 			</s:Envelope>
 			*/
+			var actor = default(string);
 			if (_exception is FaultException)
 			{
 				var faultException = (FaultException)_exception;
@@ -118,26 +122,27 @@ namespace SoapCore
 					}
 					else
 					{
-						writer.WriteElementString("faultcode", "s:" + faultException.Code.Name);
+						writer.WriteElementString("faultcode", $"{faultCodePrefix}:{faultException.Code.Name}");
 					}
 				}
 				else
 				{
-					writer.WriteElementString("faultcode", "s:Client");
+					writer.WriteElementString("faultcode", $"{faultCodePrefix}:Client");
 				}
 
-				var actor = faultException.CreateMessageFault()?.Actor;
-				if (!string.IsNullOrWhiteSpace(actor))
-                {
-                    writer.WriteElementString ("faultactor", actor);
-                }
+				actor = faultException.CreateMessageFault()?.Actor;
 			}
 			else
 			{
-				writer.WriteElementString("faultcode", "s:Client");
+				writer.WriteElementString("faultcode", $"{faultCodePrefix}:Client");
 			}
 
 			writer.WriteElementString("faultstring", faultString);
+
+			if (!string.IsNullOrWhiteSpace(actor))
+			{
+				writer.WriteElementString("faultactor", actor);
+			}
 
 			if (faultDetail != null)
 			{
@@ -158,15 +163,13 @@ namespace SoapCore
 				return null;
 			}
 
-			using (var ms = new MemoryStream())
-			{
-				var serializer = new DataContractSerializer(detailObject.GetType());
-				serializer.WriteObject(ms, detailObject);
-				ms.Position = 0;
-				var doc = new XmlDocument();
-				doc.Load(ms);
-				return doc.DocumentElement;
-			}
+			var ms = new MemoryStream();
+			var serializer = CachedDataContractSerializer.GetDataContractSerializer(detailObject.GetType());
+			serializer.WriteObject(ms, detailObject);
+			ms.Position = 0;
+			var doc = new XmlDocument();
+			doc.Load(ms);
+			return doc.DocumentElement;
 		}
 
 		/// <summary>
